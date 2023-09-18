@@ -32,7 +32,7 @@ typedef struct lua_State {
     // Stack
     uint64_t *stack;
     uint64_t *top;
-    int cap;
+    int stack_size;
 } State;
 
 void stack_push(State *L, uint64_t v);

@@ -9,6 +9,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "value.h"
+#include "debug.h"
 
 LUA_API lua_State * lua_newstate(lua_Alloc f, void *ud) {
     State *L = f(ud, NULL, 0, sizeof(State));
@@ -17,10 +18,14 @@ LUA_API lua_State * lua_newstate(lua_Alloc f, void *ud) {
     }
     L->alloc_fn = f;
     L->alloc_ud = ud;
+    L->err = NULL;
+    L->stack_size = 4096;
+    L->stack = L->top = mem_alloc(L, L->stack_size * sizeof(uint64_t));
     return L;
 }
 
 LUA_API void lua_close(lua_State *L) {
+    mem_free(L, L->stack, L->stack_size * sizeof(uint64_t));
     mem_free(L, L, sizeof(State));
 }
 
@@ -30,7 +35,7 @@ static void load_protected(State *L, void *ud) {
     uint64_t v = stack_pop(L);
     assert(is_fn(v));
     Fn *f = v2fn(v);
-//    print_fns(L, f);
+    print_fn(L, f);
 }
 
 LUA_API int lua_load(
@@ -53,13 +58,13 @@ LUA_API int lua_load(
 
 void stack_push(State *L, uint64_t v) {
     ptrdiff_t n = L->top - L->stack;
-    if (n >= L->cap) {
+    if (n >= L->stack_size) {
         L->stack = mem_realloc(
                 L,
                 L->stack,
-                L->cap * sizeof(uint64_t),
-                L->cap * sizeof(uint64_t) * 2);
-        L->cap *= 2;
+                L->stack_size * sizeof(uint64_t),
+                L->stack_size * sizeof(uint64_t) * 2);
+        L->stack_size *= 2;
         L->top = &L->stack[n];
     }
     *(L->top++) = v;

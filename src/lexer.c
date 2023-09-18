@@ -5,8 +5,8 @@
 
 #include "lexer.h"
 
-#define MAX_TK_STR_LEN 10
-#define FIRST_KEYWORD  TK_LOCAL
+#define MAX_TK_NAME_LEN 20
+#define FIRST_KEYWORD   TK_LOCAL
 
 // These must be in the same order as they appear in the enum in 'lexer.h'
 static char *KEYWORDS[] = {
@@ -228,7 +228,7 @@ int peek_tk(Lexer *l, Token *tk) {
 }
 
 static const char *TK_NAMES[] = {
-    NULL, "'=='", "'!='", "'<='", "'>='", "'..'", "'...'",
+    "'=='", "'!='", "'<='", "'>='", "'..'", "'...'",
     "'local'", "'function'", "'if'", "'else'", "'elseif'", "'then'", "'while'",
     "'do'", "'repeat'", "'until'", "'for'", "'end'", "'break'", "'return'",
     "'in'", "'and'", "'or'", "'not'", "'nil'", "'false'", "'true'",
@@ -242,7 +242,7 @@ static void tk2str(int tk, char *dst) {
         dst[2] = '\'';
         dst[3] = '\0';
     } else { // Multi-character token
-        strcpy(dst, TK_NAMES[tk - 0xff]);
+        strcpy(dst, TK_NAMES[tk - 0x100]);
     }
 }
 
@@ -250,8 +250,8 @@ int expect_tk(Lexer *l, int expected_tk, Token *tk) {
     if (l->tk.k == expected_tk) {
         return read_tk(l, tk);
     } else {
-        char expected[MAX_TK_STR_LEN];
-        char found[MAX_TK_STR_LEN];
+        char expected[MAX_TK_NAME_LEN];
+        char found[MAX_TK_NAME_LEN];
         tk2str(expected_tk, expected);
         tk2str(l->tk.k, found);
         err_syntax(l->L, &l->tk, "expected %s, found %s", expected, found);

@@ -5,11 +5,14 @@
 #include <stdint.h>
 
 // Bytecode instructions are 32 bits. Arguments are in the format:
+//
 //     xxxxxxxx  xxxxxxxx  xxxxxxxx  xxxxxxxx
 //     Opcode--  A-------  B-------  C-------
 //                         D-----------------
 //               E---------------------------
-// Opcodes are always 8 bits.
+//
+// Opcodes are always 8 bits. Some instructions take 3 8-bit arguments, some
+// take 1 8-bit and 1 16-bit, and JMP takes a single 24-bit bytecode offset.
 
 enum {
     BC_NOP,
