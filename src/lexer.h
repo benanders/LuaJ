@@ -56,7 +56,7 @@ enum {
 };
 
 typedef struct {
-    int k;
+    int t;
     char *src_name; // For error messages
     int line, col;  // For error messages
     union {
@@ -78,6 +78,6 @@ Lexer lexer_new(State *L, Reader *r);
 // Optionally return info about the token via the struct in 'tk'
 int read_tk(Lexer *l, Token *tk);
 int peek_tk(Lexer *l, Token *tk);
-int expect_tk(Lexer *l, int expected_tk, Token *tk);
+void expect_tk(Lexer *l, int expected_tk, Token *tk);
 
 #endif

@@ -33,13 +33,11 @@ enum {
     // Binary
     BC_ADDVV,
     BC_ADDVN,
-    BC_ADDNV,
     BC_SUBVV,
     BC_SUBVN,
     BC_SUBNV,
     BC_MULVV,
     BC_MULVN,
-    BC_MULNV,
     BC_DIVVV,
     BC_DIVVN,
     BC_DIVNV,

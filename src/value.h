@@ -8,6 +8,8 @@
 #include "state.h"
 #include "bytecode.h"
 
+// ---- Values ----
+
 // Values are stored as quiet NaNs. These are 64-bit doubles with all exponent
 // bits set:
 //
@@ -64,6 +66,8 @@ static inline int is_true(uint64_t v)  { return v == VAL_TRUE; }
 static inline int is_ptr(uint64_t v)   { return (v & VAL_PTR) == VAL_PTR; }
 
 
+// ---- Objects ----
+
 // GC-collected objects are all pointers to heap-allocated structs that begin
 // with 'Header'. The header tells us the type of the object, as well as
 // contains info for the GC.
@@ -113,6 +117,8 @@ typedef struct {
 
 Fn * fn_new(State *L);
 void fn_free(State *L, Fn *f);
+int fn_emit(State *L, Fn *f, BcIns ins);
+int fn_emit_k(State *L, Fn *f, uint64_t k);
 
 static inline uint64_t fn2v(Fn *f)   { return ptr2v(f); }
 static inline Fn * v2fn(uint64_t v)  { return (Fn *) v2ptr(v); }

@@ -144,12 +144,12 @@ static void lex_keyword_or_ident(Lexer *l) {
         char *keyword = KEYWORDS[i];
         if (s.len == (int) strlen(keyword) &&
                 strncmp(s.s, keyword, s.len) == 0) {
-            l->tk.k = i + FIRST_KEYWORD;
+            l->tk.t = i + FIRST_KEYWORD;
             buf_free(l->L, &s);
             return;
         }
     }
-    l->tk.k = TK_IDENT;
+    l->tk.t = TK_IDENT;
     l->tk.s = str_new(l->L, s.s, s.len);
 }
 
@@ -167,7 +167,7 @@ static void lex_number(Lexer *l) {
 
     // Convert to number
     char *end;
-    l->tk.k = TK_NUM;
+    l->tk.t = TK_NUM;
     l->tk.num = strtod(s.s, &end);
     if (end - s.s != s.len - 1) { // -1 for the NULL terminator
         buf_free(l->L, &s);
@@ -194,7 +194,7 @@ static void lex_symbol(Lexer *l) {
         break;
     default: break;
     }
-    l->tk.k = c;
+    l->tk.t = c;
 }
 
 static void next_tk(Lexer *l) {
@@ -202,7 +202,7 @@ static void next_tk(Lexer *l) {
     tk_new(l->r, &l->tk);
     char c = peek_ch(l->r);
     if (c == EOF) {
-        l->tk.k = TK_EOF;
+        l->tk.t = TK_EOF;
     } else if (isalpha(c) || c == '_') {
         lex_keyword_or_ident(l);
     } else if (isdigit(c) || (c == '.' && isdigit(peek_ch2(l->r)))) {
@@ -217,14 +217,14 @@ int read_tk(Lexer *l, Token *tk) {
     if (tk) {
         *tk = l->tk;
     }
-    return l->tk.k;
+    return l->tk.t;
 }
 
 int peek_tk(Lexer *l, Token *tk) {
     if (tk) {
         *tk = l->tk;
     }
-    return l->tk.k;
+    return l->tk.t;
 }
 
 static const char *TK_NAMES[] = {
@@ -246,14 +246,17 @@ static void tk2str(int tk, char *dst) {
     }
 }
 
-int expect_tk(Lexer *l, int expected_tk, Token *tk) {
-    if (l->tk.k == expected_tk) {
-        return read_tk(l, tk);
+void expect_tk(Lexer *l, int expected_tk, Token *tk) {
+    if (l->tk.t == expected_tk) {
+        if (tk) {
+            *tk = l->tk;
+        }
+        read_tk(l, NULL);
     } else {
         char expected[MAX_TK_NAME_LEN];
         char found[MAX_TK_NAME_LEN];
         tk2str(expected_tk, expected);
-        tk2str(l->tk.k, found);
+        tk2str(l->tk.t, found);
         err_syntax(l->L, &l->tk, "expected %s, found %s", expected, found);
     }
 }

@@ -28,6 +28,7 @@ typedef struct { // Userdata for the file reader
 } FileReader;
 
 static const char * file_reader(lua_State *L, void *ud, size_t *size) {
+    (void) L;
     FileReader *r = (FileReader *) ud;
     if (feof(r->f)) {
         return NULL;

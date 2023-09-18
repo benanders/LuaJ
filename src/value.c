@@ -44,3 +44,29 @@ void fn_free(State *L, Fn *f) {
     mem_free(L, f->ins, sizeof(BcIns) * f->max_ins);
     mem_free(L, f->k, sizeof(uint64_t) * f->max_k);
 }
+
+int fn_emit(State *L, Fn *f, BcIns ins) {
+    if (f->num_ins >= f->max_ins) {
+        f->ins = mem_realloc(
+                L,
+                f->ins,
+                f->max_ins * sizeof(BcIns),
+                f->max_ins * sizeof(BcIns) * 2);
+        f->max_ins *= 2;
+    }
+    f->ins[f->num_ins++] = ins;
+    return f->num_ins - 1;
+}
+
+int fn_emit_k(State *L, Fn *f, uint64_t k) {
+    if (f->num_k >= f->max_k) {
+        f->k = mem_realloc(
+                L,
+                f->k,
+                f->max_k * sizeof(BcIns),
+                f->max_k * sizeof(BcIns) * 2);
+        f->max_k *= 2;
+    }
+    f->k[f->num_k++] = k;
+    return f->num_k - 1;
+}

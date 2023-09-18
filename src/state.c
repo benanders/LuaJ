@@ -80,7 +80,7 @@ uint64_t stack_pop(State *L) {
 
 int pcall(State *L, ProtectedFn f, void *ud) {
     ptrdiff_t saved_top = L->top - L->stack; // Save state
-    ErrCtx j = {0};
+    Err j = {0};
     j.parent = L->err;
     L->err = &j;
     LUAI_TRY(L, &j,
