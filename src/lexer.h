@@ -10,7 +10,9 @@
 // A token mostly consists of its ID. For single character tokens, this is
 // just its ASCII representation. For multi-character tokens or
 
+#include "state.h"
 #include "reader.h"
+#include "value.h"
 
 enum {
     // Symbols
@@ -54,28 +56,28 @@ enum {
 };
 
 typedef struct {
+    int k;
     char *src_name; // For error messages
     int line, col;  // For error messages
     union {
         double num; // TK_NUM
-        struct {    // TK_IDENT, TK_STR
-            char *name;
-            int len;
-        };
+        Str *s;     // TK_IDENT
     };
-} TkInfo;
+} Token;
 
 typedef struct {
+    // The entire Lua state is needed by the lexer to be able to trigger errors
+    // and allocate memory
+    State *L;
     Reader *r;
-    int tk;
-    TkInfo tk_info;
+    Token tk; // The most recently lexed token
 } Lexer;
 
-Lexer lexer_new(Reader *r);
+Lexer lexer_new(State *L, Reader *r);
 
 // Optionally return info about the token via the struct in 'tk'
-int read_tk(Lexer *l, TkInfo *tk);
-int peek_tk(Lexer *l, TkInfo *tk);
-int expect_tk(Lexer *l, int expected_tk, TkInfo *tk);
+int read_tk(Lexer *l, Token *tk);
+int peek_tk(Lexer *l, Token *tk);
+int expect_tk(Lexer *l, int expected_tk, Token *tk);
 
 #endif

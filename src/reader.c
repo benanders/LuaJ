@@ -3,75 +3,53 @@
 
 #include "reader.h"
 
-static Reader reader_new() {
+Reader reader_new(State *L, lua_Reader reader, void *ud, const char *src_name) {
     Reader r = {0};
+    r.L = L;
+    r.fn = reader;
+    r.ud = ud;
+    r.src_name = (char *) src_name;
     r.line = 1;
     r.col = 1;
     return r;
 }
 
-Reader reader_from_str(char *src) {
-    Reader r = reader_new();
-    r.src = src;
-    return r;
-}
-
-//Reader reader_from_file(char *path) {
-//    Reader r = reader_new();
-//    r.path = path;
-//    r.f = fopen(path, "r");
-//    if (!r.f) {
-//        error(s, "cannot open file '%s'", path);
-//    }
-//    return r;
-//}
-
-static int read_ch_from_file(Reader *r) {
-    int c = getc(r->f);
-    if (c == '\r') { // Turn '\r' into '\n'
-        int c2 = getc(r->f);
-        if (c2 != '\n') { // Turn '\r\n' into '\n'
-            ungetc(c2, r->f);
-        }
-        c = '\n';
+static char read_ch_raw(Reader *r) {
+    if (r->n == 0) {
+        r->p = (char *) r->fn(r->L, r->ud, &r->n);
     }
-    return c;
-}
-
-static int read_ch_from_str(Reader *r) {
-    if (*r->src == '\0') {
+    if (!r->p || *r->p == EOF) {
         return EOF;
     }
-    int c = (int) *(r->src++);
-    if (c == '\r') { // Turn '\r' into '\n'
-        if (*r->src == '\n') { // Turn '\r\n' into '\n'
-            r->src++;
-        }
-        return '\n';
-    }
+    char c = *(r->p++);
+    r->n--;
     return c;
 }
 
-int read_ch(Reader *r) {
-    int c;
+char read_ch(Reader *r) {
+    char c;
     if (r->buf_len > 0) {
         c = r->buf[--r->buf_len];
-    } else if (r->f) {
-        c = read_ch_from_file(r);
     } else {
-        assert(r->src);
-        c = read_ch_from_str(r);
+        c = read_ch_raw(r);
+    }
+    if (c == '\r') { // Turn '\r' into '\n'
+        char c2 = read_ch_raw(r);
+        if (c2 != '\n') { // Turn '\r\n' into '\n'
+            undo_ch(r, c2);
+        }
+        c = '\n';
     }
     if (c == '\n') {
         r->line++;
         r->col = 1;
-    } else if (c != -1) {
+    } else if (c != EOF) {
         r->col++;
     }
     return c;
 }
 
-void undo_ch(Reader *r, int c) {
+void undo_ch(Reader *r, char c) {
     if (c == -1) {
         return;
     }
@@ -85,15 +63,15 @@ void undo_ch(Reader *r, int c) {
     }
 }
 
-int peek_ch(Reader *r) {
-    int c = read_ch(r);
+char peek_ch(Reader *r) {
+    char c = read_ch(r);
     undo_ch(r, c);
     return c;
 }
 
-int peek_ch2(Reader *r) {
-    int c1 = read_ch(r);
-    int c2 = read_ch(r);
+char peek_ch2(Reader *r) {
+    char c1 = read_ch(r);
+    char c2 = read_ch(r);
     undo_ch(r, c2);
     undo_ch(r, c1);
     return c2;

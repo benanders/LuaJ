@@ -7,4 +7,20 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0 -g")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
 
-add_executable(luaj src/main.c src/reader.c src/reader.h src/lexer.c src/lexer.h)
+include_directories(include)
+
+add_library(luajl
+    include/lua.h
+    src/lauxlib.c
+    src/value.h src/value.c
+    src/state.c src/state.h
+    src/reader.c src/reader.h
+    src/lexer.c src/lexer.h
+    src/parser.c src/parser.h
+        src/bytecode.h)
+
+add_executable(luaj
+    cli/main.c
+)
+
+target_link_libraries(luaj luajl)

@@ -17,30 +17,35 @@ static char *KEYWORDS[] = {
 
 typedef struct {
     char *s;
-    int len, cap;
+    int len, max;
 } StrBuf;
 
-static StrBuf str_new() {
+static StrBuf buf_new(State *L) {
     StrBuf s = {0};
-    s.cap = 8;
-    s.s = malloc(sizeof(char) * s.cap);
+    s.max = 8;
+    s.s = mem_alloc(L, sizeof(char) * s.max);
     return s;
 }
 
-static void str_free(StrBuf *s) {
-    free(s->s);
+static void buf_free(State *L, StrBuf *s) {
+    mem_free(L, s->s, sizeof(char) * s->max);
 }
 
-static void str_push(StrBuf *s, char c) {
-    if (s->len + 1 >= s->cap) {
-        s->cap *= 2;
-        s->s = realloc(s->s, sizeof(char) * s->cap);
+static void buf_push(State *L, StrBuf *s, char c) {
+    if (s->len + 1 >= s->max) {
+        s->s = mem_realloc(
+                L,
+                s->s,
+                sizeof(char) * s->max,
+                sizeof(char) * s->max * 2);
+        s->max *= 2;
     }
     s->s[s->len++] = c;
 }
 
-Lexer lexer_new(Reader *r) {
+Lexer lexer_new(State *L, Reader *r) {
     Lexer l = {0};
+    l.L = L;
     l.r = r;
     read_tk(&l, NULL);
     return l;
@@ -48,12 +53,12 @@ Lexer lexer_new(Reader *r) {
 
 // Copies the current source file/string name, line, and column position info
 // from the reader to the token.
-static void tk_new(Reader *r, TkInfo *tk) {
+static void tk_new(Reader *r, Token *tk) {
     if (!tk) {
         return;
     }
-    *tk = (TkInfo) {0};
-    tk->src_name = r->name;
+    *tk = (Token) {0};
+    tk->src_name = r->src_name;
     tk->line = r->line;
     tk->col = r->col;
 }
@@ -61,7 +66,7 @@ static void tk_new(Reader *r, TkInfo *tk) {
 static int lex_open_long_bracket(Lexer *l) {
     read_ch(l->r); // Skip first [
     int level = 0;
-    int c = peek_ch(l->r);
+    char c = peek_ch(l->r);
     while (c == '=') {
         level++;
         read_ch(l->r);
@@ -76,7 +81,7 @@ static int lex_open_long_bracket(Lexer *l) {
 
 static void skip_block_comment(Lexer *l, int level) {
     int n = -1;
-    int c = read_ch(l->r);
+    char c = read_ch(l->r);
     while (c != EOF) {
         if (n < 0 && c == ']') { // Terminator not yet started
             n = 0;
@@ -89,14 +94,13 @@ static void skip_block_comment(Lexer *l, int level) {
         }
         c = read_ch(l->r);
     }
-//    if (c == EOF) {
-//        TODO
-//        err_syntax(l->L, l->tk, "unterminated block comment");
-//    }
+    if (c == EOF) {
+        err_syntax(l->L, &l->tk, "unterminated block comment");
+    }
 }
 
 static void skip_line_comment(Lexer *l) {
-    int c = read_ch(l->r);
+    char c = read_ch(l->r);
     while (c != '\n' && c != EOF) {
         c = read_ch(l->r);
     }
@@ -115,7 +119,7 @@ static void skip_comment(Lexer *l) {
 }
 
 static void skip_spaces(Lexer *l) {
-    int c = peek_ch(l->r);
+    char c = peek_ch(l->r);
     while (1) {
         if (c == '-' && peek_ch2(l->r) == '-') { // Comment
             skip_comment(l);
@@ -129,10 +133,10 @@ static void skip_spaces(Lexer *l) {
 }
 
 static void lex_keyword_or_ident(Lexer *l) {
-    StrBuf s = str_new();
-    int c = read_ch(l->r);
+    StrBuf s = buf_new(l->L);
+    char c = read_ch(l->r);
     while (isalnum(c) || c == '_') {
-        str_push(&s, (char) c);
+        buf_push(l->L, &s, (char) c);
         c = read_ch(l->r);
     }
     undo_ch(l->r, c);
@@ -140,42 +144,40 @@ static void lex_keyword_or_ident(Lexer *l) {
         char *keyword = KEYWORDS[i];
         if (s.len == (int) strlen(keyword) &&
                 strncmp(s.s, keyword, s.len) == 0) {
-            l->tk = i + FIRST_KEYWORD;
-            str_free(&s);
+            l->tk.k = i + FIRST_KEYWORD;
+            buf_free(l->L, &s);
             return;
         }
     }
-    l->tk = TK_IDENT;
-    l->tk_info.name = s.s;
-    l->tk_info.len = s.len;
+    l->tk.k = TK_IDENT;
+    l->tk.s = str_new(l->L, s.s, s.len);
 }
 
 static void lex_number(Lexer *l) {
-    StrBuf s = str_new();
-    int c = read_ch(l->r);
-    int last = c;
+    StrBuf s = buf_new(l->L);
+    char c = read_ch(l->r);
+    char last = c;
     while (isalnum(c) || c == '.' || (strchr("eEpP", last) && strchr("+-", c))) {
-        str_push(&s, (char) c);
+        buf_push(l->L, &s, (char) c);
         last = c;
         c = read_ch(l->r);
     }
     undo_ch(l->r, c);
-    str_push(&s, '\0'); // strtod needs NULL terminator
+    buf_push(l->L, &s, '\0'); // strtod needs NULL terminator
 
     // Convert to number
     char *end;
-    l->tk = TK_NUM;
-    l->tk_info.num = strtod(s.s, &end);
+    l->tk.k = TK_NUM;
+    l->tk.num = strtod(s.s, &end);
     if (end - s.s != s.len - 1) { // -1 for the NULL terminator
-        str_free(&s);
-        // TODO
-//        err_syntax(l->L, l->tk, "invalid symbol in number");
+        buf_free(l->L, &s);
+        err_syntax(l->L, &l->tk, "invalid symbol in number");
     }
-    str_free(&s);
+    buf_free(l->L, &s);
 }
 
 static void lex_symbol(Lexer *l) {
-    int c = read_ch(l->r);
+    int c = (int) read_ch(l->r);
     switch (c) {
     case '=': if (peek_ch(l->r) == '=') { read_ch(l->r); c = TK_EQ; }  break;
     case '~': if (peek_ch(l->r) == '=') { read_ch(l->r); c = TK_NEQ; } break;
@@ -192,15 +194,15 @@ static void lex_symbol(Lexer *l) {
         break;
     default: break;
     }
-    l->tk = c;
+    l->tk.k = c;
 }
 
 static void next_tk(Lexer *l) {
     skip_spaces(l);
-    tk_new(l->r, &l->tk_info);
-    int c = peek_ch(l->r);
+    tk_new(l->r, &l->tk);
+    char c = peek_ch(l->r);
     if (c == EOF) {
-        l->tk = TK_EOF;
+        l->tk.k = TK_EOF;
     } else if (isalpha(c) || c == '_') {
         lex_keyword_or_ident(l);
     } else if (isdigit(c) || (c == '.' && isdigit(peek_ch2(l->r)))) {
@@ -210,19 +212,19 @@ static void next_tk(Lexer *l) {
     }
 }
 
-int read_tk(Lexer *l, TkInfo *tk) {
+int read_tk(Lexer *l, Token *tk) {
     next_tk(l);
     if (tk) {
-        *tk = l->tk_info;
+        *tk = l->tk;
     }
-    return l->tk;
+    return l->tk.k;
 }
 
-int peek_tk(Lexer *l, TkInfo *tk) {
+int peek_tk(Lexer *l, Token *tk) {
     if (tk) {
-        *tk = l->tk_info;
+        *tk = l->tk;
     }
-    return l->tk;
+    return l->tk.k;
 }
 
 static const char *TK_NAMES[] = {
@@ -244,15 +246,14 @@ static void tk2str(int tk, char *dst) {
     }
 }
 
-int expect_tk(Lexer *l, int expected_tk, TkInfo *tk) {
-    if (l->tk == expected_tk) {
+int expect_tk(Lexer *l, int expected_tk, Token *tk) {
+    if (l->tk.k == expected_tk) {
         return read_tk(l, tk);
     } else {
         char expected[MAX_TK_STR_LEN];
         char found[MAX_TK_STR_LEN];
         tk2str(expected_tk, expected);
-        tk2str(l->tk, found);
-//        err_syntax(l->L, t, "expected %s, found %s", expected, found);
-        // TODO
+        tk2str(l->tk.k, found);
+        err_syntax(l->L, &l->tk, "expected %s, found %s", expected, found);
     }
 }

@@ -10,24 +10,27 @@
 
 #include <stdio.h>
 
+#include "state.h"
+
 #define MAX_CH_PEEK 3
 
 typedef struct {
-    char *name; // For error messages originating from this reader
-    FILE *f;    // NULL if reading from string
-    char *path;
-    char *src;  // NULL if reading from file
+    State *L;
+    lua_Reader fn;
+    void *ud;
+    char *p;
+    size_t n; // Bytes remaining
+    char *src_name; // Used for error/debug messages
     int line, col;
-    int buf[MAX_CH_PEEK];
+    char buf[MAX_CH_PEEK];
     int buf_len;
 } Reader;
 
-Reader reader_from_str(char *src);
-//Reader reader_from_file(char *path);
+Reader reader_new(State *L, lua_Reader reader, void *ud, const char *src_name);
 
-int read_ch(Reader *r);
-void undo_ch(Reader *r, int c);
-int peek_ch(Reader *r);
-int peek_ch2(Reader *r);
+char read_ch(Reader *r);
+void undo_ch(Reader *r, char c);
+char peek_ch(Reader *r);
+char peek_ch2(Reader *r);
 
 #endif
