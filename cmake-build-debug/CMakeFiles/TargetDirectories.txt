@@ -1,0 +1,3 @@
+/Users/benanderson/dev/luaj/cmake-build-debug/CMakeFiles/luaj.dir
+/Users/benanderson/dev/luaj/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/benanderson/dev/luaj/cmake-build-debug/CMakeFiles/rebuild_cache.dir
