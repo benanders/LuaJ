@@ -13,9 +13,10 @@
 #define MAX_CH_PEEK 3
 
 typedef struct {
-    FILE *f;   // NULL if reading from string
+    char *name; // For error messages originating from this reader
+    FILE *f;    // NULL if reading from string
     char *path;
-    char *src; // NULL if reading from file
+    char *src;  // NULL if reading from file
     int line, col;
     int buf[MAX_CH_PEEK];
     int buf_len;
