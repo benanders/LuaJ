@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <setjmp.h>
 
+#define UNREACHABLE() (assert(0))
+
 // File, line, and column information for errors
 typedef struct {
     char *chunk_name; // Can be NULL

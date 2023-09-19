@@ -112,5 +112,5 @@ OP_POW:
     // ---- Control Flow ----
 
 OP_RET0:
-    printf("first stack: %g\n", v2n(s[0]));
+    printf("first stack: %g\n", v2n(s[1]));
 }

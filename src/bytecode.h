@@ -46,8 +46,8 @@
 enum {
 #define X(name, _) BC_ ## name,
     BYTECODE
-    BC_LAST, // Marker for tables indexed by opcode
 #undef X
+    BC_LAST, // Marker for tables indexed by opcode
 };
 
 typedef uint32_t BcIns;

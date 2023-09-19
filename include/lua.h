@@ -131,7 +131,6 @@ LUA_API void       (lua_close) (lua_State *L);
 /*
 ** access functions (stack -> C)
 */
-
 //LUA_API int             (lua_isnumber) (lua_State *L, int idx);
 //LUA_API int             (lua_isstring) (lua_State *L, int idx);
 //LUA_API int             (lua_iscfunction) (lua_State *L, int idx);
