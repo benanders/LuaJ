@@ -17,20 +17,14 @@
 #define BYTECODE       \
     X(NOP, 3)          \
                        \
-    /* Constants */    \
+    /* Storage */      \
+    X(MOV, 3)          \
     X(KINT, 3)         \
     X(KNUM, 3)         \
     X(KPRIM, 3)        \
-    X(KFN, 3)          \
-    X(KNIL, 3)         \
                        \
-    /* Move */         \
-    X(MOV, 3)          \
-                       \
-    /* Unary */        \
+    /* Arithmetic */   \
     X(NEG, 3)          \
-                       \
-    /* Binary */       \
     X(ADDVV, 3)        \
     X(ADDVN, 3)        \
     X(SUBVV, 3)        \
@@ -45,7 +39,6 @@
     X(MODVN, 3)        \
     X(MODNV, 3)        \
     X(POW, 3)          \
-    X(CAT, 3)          \
                        \
     /* Control flow */ \
     X(RET0, 3)

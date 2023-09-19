@@ -29,6 +29,10 @@
 #define VAL_FALSE (QUIET_NAN | TAG_FALSE)
 #define VAL_TRUE  (QUIET_NAN | TAG_TRUE)
 
+static inline uint64_t prim2v(uint16_t tag) {
+    return QUIET_NAN | tag;
+}
+
 // A pointer is indicated by setting the sign bit (1 << 63). The lower 48 bits
 // are the pointer value.
 //
