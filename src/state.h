@@ -12,11 +12,17 @@
 #include <stdint.h>
 #include <setjmp.h>
 
+// File, line, and column information for errors
+typedef struct {
+    char *chunk_name; // Can be NULL
+    int line, col;    // Can be 0 to indicate unknown
+} ErrInfo;
+
 // Handles protected calls and error catching during parsing and runtime.
 typedef struct Err {
     struct Err *parent; // Linked list for nested pcalls
     luai_jmpbuf buf;
-    volatile int err_code;
+    volatile int status;
 } Err;
 
 typedef void (*ProtectedFn)(struct lua_State *L, void *ud);
@@ -42,8 +48,12 @@ void mem_free(State *L, void *ptr, size_t bytes);
 
 // Protected calls and errors
 int pcall(State *L, ProtectedFn f, void *ud);
-void err_syntax(State *L, void *tk, char *fmt, ...) __attribute__((noreturn));
-void err_mem(State *L) __attribute__((noreturn));
+__attribute__((noreturn))
+void err_syntax(State *L, ErrInfo *info, char *fmt, ...);
+__attribute__((noreturn))
+void err_run(State *L, ErrInfo *info, char *fmt, ...);
+__attribute__((noreturn))
+void err_mem(State *L);
 
 // Stack manipulation
 void stack_push(State *L, uint64_t v);

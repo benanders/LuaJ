@@ -58,7 +58,7 @@ static void tk_new(Reader *r, Token *tk) {
         return;
     }
     *tk = (Token) {0};
-    tk->src_name = r->src_name;
+    tk->chunk_name = r->chunk_name;
     tk->line = r->line;
     tk->col = r->col;
 }

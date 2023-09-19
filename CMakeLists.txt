@@ -17,7 +17,7 @@ add_library(luajl
         src/parser.c src/parser.h
         src/bytecode.h
         src/value.h src/value.c
-        src/debug.c src/debug.h)
+        src/debug.c src/debug.h src/vm.c src/vm.h)
 
 add_executable(luaj cli/main.c)
 target_link_libraries(luaj luajl)

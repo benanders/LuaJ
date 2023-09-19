@@ -21,7 +21,6 @@ static DebugInfo BC_DEBUG_INFO[] = {
     { "RET0", 0 },
 };
 
-
 static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     printf("%.4d", idx);
     int op = bc_op(*ins);

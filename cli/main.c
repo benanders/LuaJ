@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
         write(prog_name, "expected <file name>");
         return EXIT_FAILURE;
     }
-    int err_code = luaL_loadfile(L, argv[1]);
+    int status = luaL_loadfile(L, argv[1]) || lua_pcall(L, 0, 0, 0);
     lua_close(L);
-    return err_code;
+    return status;
 }

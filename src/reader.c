@@ -3,12 +3,16 @@
 
 #include "reader.h"
 
-Reader reader_new(State *L, lua_Reader reader, void *ud, const char *src_name) {
+Reader reader_new(
+        State *L,
+        lua_Reader reader,
+        void *ud,
+        char *chunk_name) {
     Reader r = {0};
     r.L = L;
     r.fn = reader;
     r.ud = ud;
-    r.src_name = (char *) src_name;
+    r.chunk_name = chunk_name;
     r.line = 1;
     r.col = 1;
     return r;

@@ -20,13 +20,17 @@ typedef struct {
     void *ud;
     char *p;
     size_t n; // Bytes remaining
-    char *src_name; // Used for error/debug messages
+    char *chunk_name; // For error/debug messages
     int line, col;
     char buf[MAX_CH_PEEK];
     int buf_len;
 } Reader;
 
-Reader reader_new(State *L, lua_Reader reader, void *ud, const char *src_name);
+Reader reader_new(
+        State *L,
+        lua_Reader reader,
+        void *ud,
+        char *chunk_name);
 
 char read_ch(Reader *r);
 void undo_ch(Reader *r, char c);

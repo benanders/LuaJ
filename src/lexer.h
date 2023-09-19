@@ -57,8 +57,8 @@ enum {
 
 typedef struct {
     int t;
-    char *src_name; // For error messages
-    int line, col;  // For error messages
+    char *chunk_name; // For error messages
+    int line, col;    // For error messages
     union {
         double num; // TK_NUM
         Str *s;     // TK_IDENT
