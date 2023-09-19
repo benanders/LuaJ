@@ -14,43 +14,47 @@
 // Opcodes are always 8 bits. Some instructions take 3 8-bit arguments, some
 // take 1 8-bit and 1 16-bit, and JMP takes a single 24-bit bytecode offset.
 
+#define BYTECODE       \
+    X(NOP, 3)          \
+                       \
+    /* Constants */    \
+    X(KINT, 3)         \
+    X(KNUM, 3)         \
+    X(KPRIM, 3)        \
+    X(KFN, 3)          \
+    X(KNIL, 3)         \
+                       \
+    /* Move */         \
+    X(MOV, 3)          \
+                       \
+    /* Unary */        \
+    X(NEG, 3)          \
+                       \
+    /* Binary */       \
+    X(ADDVV, 3)        \
+    X(ADDVN, 3)        \
+    X(SUBVV, 3)        \
+    X(SUBVN, 3)        \
+    X(SUBNV, 3)        \
+    X(MULVV, 3)        \
+    X(MULVN, 3)        \
+    X(DIVVV, 3)        \
+    X(DIVVN, 3)        \
+    X(DIVNV, 3)        \
+    X(MODVV, 3)        \
+    X(MODVN, 3)        \
+    X(MODNV, 3)        \
+    X(POW, 3)          \
+    X(CAT, 3)          \
+                       \
+    /* Control flow */ \
+    X(RET0, 3)
+
 enum {
-    BC_NOP,
-
-    // Constants
-    BC_KINT,
-    BC_KNUM,
-    BC_KPRIM,
-    BC_KFN,
-    BC_KNIL, // Set [d] slots from [a] to nil
-
-    // Move
-    BC_MOV,
-
-    // Unary
-    BC_NEG,
-
-    // Binary
-    BC_ADDVV,
-    BC_ADDVN,
-    BC_SUBVV,
-    BC_SUBVN,
-    BC_SUBNV,
-    BC_MULVV,
-    BC_MULVN,
-    BC_DIVVV,
-    BC_DIVVN,
-    BC_DIVNV,
-    BC_MODVV,
-    BC_MODVN,
-    BC_MODNV,
-    BC_POW,
-    BC_CAT,
-
-    // Control flow
-    BC_RET0,
-
+#define X(name, _) BC_ ## name,
+    BYTECODE
     BC_LAST, // Marker for tables indexed by opcode
+#undef X
 };
 
 typedef uint32_t BcIns;

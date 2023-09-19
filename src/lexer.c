@@ -95,7 +95,8 @@ static void skip_block_comment(Lexer *l, int level) {
         c = read_ch(l->r);
     }
     if (c == EOF) {
-        err_syntax(l->L, &l->tk, "unterminated block comment");
+        ErrInfo info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "unterminated block comment");
     }
 }
 
@@ -171,7 +172,8 @@ static void lex_number(Lexer *l) {
     l->tk.num = strtod(s.s, &end);
     if (end - s.s != s.len - 1) { // -1 for the NULL terminator
         buf_free(l->L, &s);
-        err_syntax(l->L, &l->tk, "invalid symbol in number");
+        ErrInfo info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "invalid symbol in number");
     }
     buf_free(l->L, &s);
 }
@@ -257,6 +259,15 @@ void expect_tk(Lexer *l, int expected_tk, Token *tk) {
         char found[MAX_TK_NAME_LEN];
         tk2str(expected_tk, expected);
         tk2str(l->tk.t, found);
-        err_syntax(l->L, &l->tk, "expected %s, found %s", expected, found);
+        ErrInfo info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "expected %s, found %s", expected, found);
     }
+}
+
+ErrInfo tk2err(Token *tk) {
+    ErrInfo info = {0};
+    info.chunk_name = tk->chunk_name;
+    info.line = tk->line;
+    info.col = tk->col;
+    return info;
 }

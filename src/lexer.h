@@ -80,4 +80,6 @@ int read_tk(Lexer *l, Token *tk);
 int peek_tk(Lexer *l, Token *tk);
 void expect_tk(Lexer *l, int expected_tk, Token *tk);
 
+ErrInfo tk2err(Token *tk);
+
 #endif

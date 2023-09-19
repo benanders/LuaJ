@@ -9,16 +9,9 @@ typedef struct {
 } DebugInfo;
 
 static DebugInfo BC_DEBUG_INFO[] = {
-    { "NOP", 0 },
-    { "KINT", 2 }, { "KNUM", 2 }, { "KPRIM", 2 }, { "KFN", 2 }, { "KNIL", 2 },
-    { "MOV", 2 }, { "NEG", 2 },
-    { "ADDVV", 3 }, { "ADDVN", 3 },
-    { "SUBVV", 3 }, { "SUBVN", 3 }, { "SUBNV", 3 },
-    { "MULVV", 3 }, { "MULVN", 3 },
-    { "DIVVV", 3 }, { "DIVVN", 3 }, { "DIVNV", 3 },
-    { "MODVV", 3 }, { "MODVN", 3 }, { "MODNV", 3 },
-    { "POW", 3 }, { "CAT", 3 },
-    { "RET0", 0 },
+#define X(name, num_args) { #name, num_args },
+    BYTECODE
+#undef X
 };
 
 static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {

@@ -47,7 +47,8 @@ static int emit_k(Parser *p, uint64_t k) {
     if (idx > UINT16_MAX) {
         Token err;
         peek_tk(p->l, &err);
-        err_syntax(p->L, &err, "too many constants in function");
+        ErrInfo info = tk2err(&err);
+        err_syntax(p->L, &info, "too many constants in function");
     }
     return idx;
 }
@@ -83,7 +84,8 @@ static uint8_t reserve_slot(Parser *p) {
     if (p->f->num_stack >= UINT8_MAX) { // 254 max (0xff is NO_SLOT)
         Token err;
         peek_tk(p->l, &err);
-        err_syntax(p->L, &err, "too many local variables in function");
+        ErrInfo info = tk2err(&err);
+        err_syntax(p->L, &info, "too many local variables in function");
     }
     return p->f->num_stack++;
 }
