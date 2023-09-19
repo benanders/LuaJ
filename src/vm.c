@@ -63,7 +63,6 @@ OP_KPRIM:
 
     // ---- Arithmetic ----
 
-    // TODO: type checking
 OP_NEG:
     check_num(L, s[bc_d(*ip)]);
     s[bc_a(*ip)] = n2v(-v2n(s[bc_d(*ip)]));
@@ -134,7 +133,10 @@ OP_POW:
 
     // ---- Comparisons ----
 
-    // Skip the following BC_JMP instruction if the condition is *false*
+    // Comparison instructions are always followed by a 'BC_JMP' instruction.
+    // We skip the jump instruction (by incrementing 'ip') if the condition is
+    // *false*.
+
 OP_IST:
     if (!compares_true(s[bc_d(*ip)])) { ip++; }
     NEXT();

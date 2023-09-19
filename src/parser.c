@@ -217,6 +217,12 @@ static uint8_t BINOP_BC[TK_LAST] = {
 #undef X
 };
 
+static int INVERT_TK[TK_LAST] = {
+    [TK_EQ] = TK_NEQ, [TK_NEQ] = TK_EQ,
+    ['<'] = TK_GE, [TK_LE] = '>',
+    ['>'] = TK_LE, [TK_GE] = '<',
+};
+
 static inline int is_int(double n, int *i) {
     lua_number2int(*i, n);
     return n == *i;
@@ -507,8 +513,46 @@ static void emit_eq(Parser *p, int op, Expr *l, Expr r) {
     l->pc = emit_jmp(p);
 }
 
-static void emit_rel(Parser *p, int op, Expr *l, Expr r) {
+static int fold_rel(int op, Expr *l, Expr r) {
+    if (l->t != EXPR_NUM || r.t != EXPR_NUM) {
+        return 0;
+    }
+    double a = l->num, b = r.num;
+    int c;
+    switch (op) {
+        case '<':   c = a < b;  break;
+        case TK_LE: c = a <= b; break;
+        case '>':   c = a > b;  break;
+        case TK_GE: c = a >= b; break;
+        default:  UNREACHABLE();
+    }
+    expr_new(l, EXPR_PRIM);
+    l->tag = c ? TAG_TRUE : TAG_FALSE;
+    return 1;
+}
 
+static void emit_rel(Parser *p, int op, Expr *l, Expr r) {
+    if (fold_rel(op, l, r)) {
+        return;
+    }
+    Expr *ll = l, *rr = &r;
+    if (ll->t != EXPR_SLOT) {
+        ll = &r, rr = l; // Constant on the right
+        op = INVERT_TK[op];
+    }
+    uint16_t d = inline_uint16_num(p, rr);
+    uint8_t a = to_any_slot(p, ll);
+    if (a > d) { // Free top slot first
+        free_expr_slot(p, ll);
+        free_expr_slot(p, rr);
+    } else {
+        free_expr_slot(p, rr);
+        free_expr_slot(p, ll);
+    }
+    int bc = BINOP_BC[op] + (rr->t == EXPR_NUM);
+    expr_new(l, EXPR_JMP);
+    emit(p, ins2(bc, a, d));
+    l->pc = emit_jmp(p);
 }
 
 static void emit_binop(Parser *p, int op, Expr *l, Expr r) {
