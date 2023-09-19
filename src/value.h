@@ -32,16 +32,17 @@
 
 #define QUIET_NAN ((uint64_t) 0x7ffc000000000000)
 
-#define TAG_OBJ   (QUIET_NAN | (((uint64_t) 1) << 63))
-#define OBJ_MASK  (TAG_OBJ | (((uint64_t) 0b11) << 48))
-#define TAG_PTR   (TAG_OBJ | (((uint64_t) 0b00) << 48))
-#define TAG_PRIM  (TAG_OBJ | (((uint64_t) 0b01) << 48))
-#define TAG_NIL   (0b00)
-#define TAG_FALSE (0b01)
-#define TAG_TRUE  (0b10)
-#define VAL_NIL   (TAG_PRIM | TAG_NIL)
-#define VAL_FALSE (TAG_PRIM | TAG_FALSE)
-#define VAL_TRUE  (TAG_PRIM | TAG_TRUE)
+#define TAG_OBJ    (QUIET_NAN | (((uint64_t) 1) << 63))
+#define OBJ_MASK   (TAG_OBJ | (((uint64_t) 0b11) << 48))
+#define TAG_PTR    (TAG_OBJ | (((uint64_t) 0b00) << 48))
+#define TAG_PRIM   (TAG_OBJ | (((uint64_t) 0b01) << 48))
+#define TAG_TRUE   (0b00)
+#define TAG_NIL    (0b01)
+#define TAG_FALSE  (0b11)
+#define VAL_NIL    (TAG_PRIM | TAG_NIL)
+#define VAL_FALSE  (TAG_PRIM | TAG_FALSE)
+#define VAL_TRUE   (TAG_PRIM | TAG_TRUE)
+#define FALSE_MASK (TAG_PRIM | 0b01)
 
 static inline int is_num(uint64_t v)   { return (v & TAG_OBJ) != TAG_OBJ; }
 static inline int is_nan(uint64_t v)   { return v == QUIET_NAN; }
@@ -50,6 +51,10 @@ static inline int is_prim(uint64_t v)  { return (v & OBJ_MASK) == TAG_PRIM; }
 static inline int is_nil(uint64_t v)   { return v == VAL_NIL; }
 static inline int is_false(uint64_t v) { return v == VAL_FALSE; }
 static inline int is_true(uint64_t v)  { return v == VAL_TRUE; }
+
+static inline int compares_true(uint64_t v) {
+    return (v & FALSE_MASK) != FALSE_MASK;
+}
 
 static inline uint64_t n2v(double n) {
     union { double n; uint64_t v; } conv;

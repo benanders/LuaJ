@@ -19,6 +19,10 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     int op = bc_op(*ins);
     DebugInfo info = BC_DEBUG_INFO[op];
     printf("\t%s", info.name);
+    if (op == BC_JMP) {
+        printf("\t=> %.4d\n", idx + (int) bc_e(*ins) - JMP_BIAS);
+        return;
+    }
     switch (info.num_args) {
         case 1: printf("\t%d\t\t", bc_e(*ins)); break;
         case 2: printf("\t%d\t%d\t", bc_a(*ins), bc_d(*ins)); break;
@@ -29,7 +33,7 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     case BC_KNUM:
         printf("\t; %g", v2n(f->k[bc_d(*ins)]));
         break;
-    case BC_KPRIM:
+    case BC_KPRIM: case BC_EQVP: case BC_NEQVP:
         printf("\t; ");
         switch (bc_d(*ins)) {
             case TAG_NIL:   printf("nil"); break;
@@ -42,6 +46,10 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
         break;
     case BC_ADDVN: case BC_SUBVN: case BC_MULVN: case BC_DIVVN: case BC_MODVN:
         printf("\t; %g", v2n(f->k[bc_c(*ins)]));
+        break;
+    case BC_EQVN: case BC_NEQVN:
+    case BC_LTVN: case BC_LEVN: case BC_GTVN: case BC_GEVN:
+        printf("\t; %g", v2n(f->k[bc_d(*ins)]));
         break;
     default: break;
     }

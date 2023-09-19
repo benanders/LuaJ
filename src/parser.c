@@ -7,14 +7,20 @@
 #include "lexer.h"
 #include "value.h"
 
-// For EXPR_RELOC who haven't had a destination slot assigned yet
+// For instructions associated with an EXPR_RELOC that haven't had a destination
+// slot assigned yet.
 #define NO_SLOT 0xff
+
+// Used for 'BC_JMP' instructions that have been emitted but haven't had their
+// jump target set yet.
+#define JMP_NONE (-1)
 
 enum {
     EXPR_PRIM,
     EXPR_NUM,
     EXPR_SLOT,
     EXPR_RELOC,
+    EXPR_JMP,
 };
 
 typedef struct {
@@ -23,8 +29,9 @@ typedef struct {
         uint16_t tag; // EXPR_PRIM
         double num;   // EXPR_NUM
         uint8_t slot; // EXPR_SLOT
-        size_t pc;    // EXPR_RELOC
+        int pc;       // EXPR_RELOC, EXPR_JMP
     };
+    int true, false;
 } Expr;
 
 typedef struct BlockScope {
@@ -56,6 +63,7 @@ static Parser parser_new(State *L, Lexer *l) {
 static void expr_new(Expr *e, int t) {
     *e = (Expr) {0};
     e->t = t;
+    e->true = e->false = JMP_NONE;
 }
 
 static int emit(Parser *p, BcIns ins) {
@@ -160,12 +168,18 @@ enum {
 // The format of each X-entry in the binary operator table is:
 //   token, precedence, bytecode opcode, is commutative?, is right associative?
 #define BINOPS \
-    X('+', PREC_ADD, BC_ADDVV, 1, 0) \
-    X('-', PREC_ADD, BC_SUBVV, 0, 0) \
-    X('*', PREC_MUL, BC_MULVV, 1, 0) \
-    X('/', PREC_MUL, BC_DIVVV, 0, 0) \
-    X('%', PREC_MUL, BC_MODVV, 0, 0) \
-    X('^', PREC_POW, BC_POW,   0, 1)
+    X('+',    PREC_ADD, BC_ADDVV, 1, 0) \
+    X('-',    PREC_ADD, BC_SUBVV, 0, 0) \
+    X('*',    PREC_MUL, BC_MULVV, 1, 0) \
+    X('/',    PREC_MUL, BC_DIVVV, 0, 0) \
+    X('%',    PREC_MUL, BC_MODVV, 0, 0) \
+    X('^',    PREC_POW, BC_POW,   0, 1) \
+    X(TK_EQ,  PREC_CMP, BC_EQVV,  1, 0) \
+    X(TK_NEQ, PREC_CMP, BC_NEQVV, 1, 0) \
+    X('<',    PREC_CMP, BC_LTVV,  0, 0) \
+    X(TK_LE,  PREC_CMP, BC_LEVV,  0, 0) \
+    X('>',    PREC_CMP, BC_GTVV,  0, 0) \
+    X(TK_GE,  PREC_CMP, BC_GEVV,  0, 0)
 
 static int BINOP_PREC[TK_LAST] = {
 #define X(tk, prec, _, __, ___) [tk] = prec,
@@ -203,12 +217,69 @@ static uint8_t BINOP_BC[TK_LAST] = {
 #undef X
 };
 
-// Forward declaration
-static void parse_subexpr(Parser *p, Expr *l, int min_prec);
-
 static inline int is_int(double n, int *i) {
     lua_number2int(*i, n);
     return n == *i;
+}
+
+static void set_jmp_target(Parser *p, int jmp, int target) {
+    if (jmp == JMP_NONE) {
+        return;
+    }
+    BcIns *ins = &p->f->fn->ins[jmp];
+    int offset = target - jmp + JMP_BIAS;
+    if (offset >= 1 << 24) { // Max 24-bit value
+        Token tk;
+        peek_tk(p->l, &tk);
+        ErrInfo info = tk2err(&tk);
+        err_syntax(p->L, &info, "control structure too long");
+    }
+    bc_set_e(ins, (uint32_t) offset);
+}
+
+static int get_jmp_target(Parser *p, int jmp) {
+    assert(jmp != JMP_NONE);
+    BcIns *ins = &p->f->fn->ins[jmp];
+    int delta = (int) bc_e(*ins);
+    return jmp + delta - JMP_BIAS;
+}
+
+static int emit_jmp(Parser *p) {
+    int pc = emit(p, ins0(BC_JMP));
+    set_jmp_target(p, pc, JMP_NONE);
+    return pc;
+}
+
+// Is there a jump list associated with the expression value?
+static int has_jmp(Expr *e) {
+    return e->true != JMP_NONE || e->false != JMP_NONE;
+}
+
+// Add a jump list (or single jump instruction) to a jump list. 'head'
+// specifies a jump list. This function puts 'to_add' at the start of the
+// 'head' jump list.
+static void add_jmp_to_list(Parser *p, int *head, int to_add) {
+    if (to_add == JMP_NONE) { // Nothing to add
+        return;
+    }
+    if (*head == JMP_NONE) { // 'head' list is empty
+        *head = to_add;
+        return;
+    }
+    while (get_jmp_target(p, to_add) != JMP_NONE) { // Find end of 'to_add' list
+        to_add = get_jmp_target(p, to_add);
+    }
+    set_jmp_target(p, to_add, *head);
+    *head = to_add;
+}
+
+// Set the jump target for every jump in the jump list to 'target'.
+static void patch_jmp_list(Parser *p, int head, int target) {
+    while (head != JMP_NONE) {
+        int next = get_jmp_target(p, head);
+        set_jmp_target(p, head, target);
+        head = next;
+    }
 }
 
 // Stores the result of an expression into a specific stack slot.
@@ -234,7 +305,21 @@ static void to_slot(Parser *p, Expr *e, uint8_t dst) {
     case EXPR_RELOC:
         bc_set_a(&p->f->fn->ins[e->pc], dst);
         break;
-    default: UNREACHABLE();
+    default: break;
+    }
+    if (e->t == EXPR_JMP) {
+        add_jmp_to_list(p, &e->true, e->pc);
+    }
+    if (has_jmp(e)) {
+        int before = (e->t != EXPR_JMP) ? emit_jmp(p) : JMP_NONE;
+        int false = emit(p, ins2(BC_KPRIM, dst, TAG_FALSE));
+        int middle = emit_jmp(p);
+        int true = emit(p, ins2(BC_KPRIM, dst, TAG_TRUE));
+        int end = p->f->fn->num_ins;
+        set_jmp_target(p, before, end);
+        set_jmp_target(p, middle, end);
+        patch_jmp_list(p, e->true, true);
+        patch_jmp_list(p, e->false, false);
     }
     expr_new(e, EXPR_SLOT);
     e->slot = dst;
@@ -269,13 +354,30 @@ static uint8_t to_any_slot(Parser *p, Expr *e) {
     return to_next_slot(p, e);
 }
 
-// Inlines a number's index into the function's constants array if it'll fit
-// into a 'uint8_t'. Otherwise, puts the expression into a stack slot.
 static uint8_t inline_uint8_num(Parser *p, Expr *e) {
     if (e->t == EXPR_NUM && p->f->fn->num_k <= UINT8_MAX) {
         return (uint8_t) emit_k(p, n2v(e->num));
+    } else {
+        return to_any_slot(p, e);
     }
-    return to_any_slot(p, e);
+}
+
+static uint16_t inline_uint16_num(Parser *p, Expr *e) {
+    if (e->t == EXPR_NUM) {
+        int idx = emit_k(p, n2v(e->num));
+        assert(idx <= UINT16_MAX);
+        return (uint16_t) idx;
+    } else {
+        return to_any_slot(p, e);
+    }
+}
+
+static uint16_t inline_uint16_prim_num(Parser *p, Expr *e) {
+    if (e->t == EXPR_PRIM) {
+        return e->tag;
+    } else {
+        return inline_uint16_num(p, e);
+    }
 }
 
 static int fold_unop(int op, Expr *l) {
@@ -300,11 +402,17 @@ static void emit_unop(Parser *p, int op, Expr *l) {
     l->pc = emit(p, ins2(UNOP_BC[op], NO_SLOT, d));
 }
 
-static void emit_binop_left(Parser *p, int binop, Expr *l) {
-    switch (binop) {
+static void emit_binop_left(Parser *p, int op, Expr *l) {
+    switch (op) {
     case '+': case '-': case '*': case '/': case '%': case '^':
+    case '<': case TK_LE: case '>': case TK_GE:
         if (l->t != EXPR_NUM) {
-            to_any_slot(p, l); // Needs to be on the stack
+            to_any_slot(p, l);
+        }
+        break;
+    case TK_EQ: case TK_NEQ:
+        if (l->t != EXPR_NUM && l->t != EXPR_PRIM) {
+            to_any_slot(p, l);
         }
         break;
     default: assert(0); // TODO: remaining binops
@@ -315,16 +423,18 @@ static int fold_arith(int op, Expr *l, Expr r) {
     if (l->t != EXPR_NUM || r.t != EXPR_NUM) {
         return 0;
     }
-    double a = l->num, b = r.num;
+    double a = l->num, b = r.num, c;
     switch (op) {
-        case '+': l->num = a + b; break;
-        case '-': l->num = a - b; break;
-        case '*': l->num = a * b; break;
-        case '/': l->num = a / b; break;
-        case '%': l->num = fmod(a, b); break;
-        case '^': l->num = pow(a, b);  break;
+        case '+': c = a + b; break;
+        case '-': c = a - b; break;
+        case '*': c = a * b; break;
+        case '/': c = a / b; break;
+        case '%': c = fmod(a, b); break;
+        case '^': c = pow(a, b);  break;
         default:  UNREACHABLE();
     }
+    expr_new(l, EXPR_NUM);
+    l->num = c;
     return 1;
 }
 
@@ -332,42 +442,92 @@ static void emit_arith(Parser *p, int op, Expr *l, Expr r) {
     if (fold_arith(op, l, r)) {
         return;
     }
+    Expr *ll = l, *rr = &r;
+    if (IS_COMMUTATIVE[op] && ll->t != EXPR_SLOT) {
+        ll = &r, rr = l; // Constant on the right
+    }
     uint8_t b, c;
     if (op == '^') {
-        c = to_any_slot(p, &r);
-        b = to_any_slot(p, l);
+        c = to_any_slot(p, rr);
+        b = to_any_slot(p, ll);
     } else {
-        c = inline_uint8_num(p, &r);
-        b = inline_uint8_num(p, l);
-        assert(l->t == EXPR_SLOT || l->t == EXPR_NUM);
-        assert(r.t == EXPR_SLOT || r.t == EXPR_NUM);
+        c = inline_uint8_num(p, rr);
+        b = inline_uint8_num(p, ll);
     }
-    assert(l->t == EXPR_SLOT || r.t == EXPR_SLOT); // Not both consts
     if (b > c) { // Free top slot first
-        free_expr_slot(p, l);
-        free_expr_slot(p, &r);
+        free_expr_slot(p, ll);
+        free_expr_slot(p, rr);
     } else {
-        free_expr_slot(p, &r);
-        free_expr_slot(p, l);
-    }
-    Expr *ll = l, *rr = &r;
-    if (IS_COMMUTATIVE[op] && ll->t == EXPR_NUM) {
-        ll = &r, rr = l;
-        uint8_t tmp = b; b = c; c = tmp;
+        free_expr_slot(p, rr);
+        free_expr_slot(p, ll);
     }
     int bc = BINOP_BC[op] + (rr->t == EXPR_NUM) + (ll->t == EXPR_NUM) * 2;
     expr_new(l, EXPR_RELOC);
     l->pc = emit(p, ins3(bc, NO_SLOT, b, c));
 }
 
-static void emit_binop(Parser *p, int binop, Expr *l, Expr r) {
-    switch (binop) {
+static int fold_eq(int op, Expr *l, Expr r) {
+    if (l->t >= EXPR_SLOT || r.t >= EXPR_SLOT) {
+        return 0;
+    }
+    int k;
+    if (l->t == EXPR_NUM && r.t == EXPR_NUM) {
+        k = (op == TK_NEQ) ^ (l->num == r.num);
+    } else if (l->t == EXPR_PRIM && r.t == EXPR_PRIM) {
+        k = (op == TK_NEQ) ^ (l->tag == r.tag);
+    } else { // One a prim and the other a num
+        uint16_t tag = l->t == EXPR_PRIM ? l->tag : r.tag;
+        k = (op == TK_NEQ) ^ (tag == TAG_TRUE);
+    }
+    expr_new(l, EXPR_PRIM);
+    l->tag = k ? TAG_TRUE : TAG_FALSE;
+    return 1;
+}
+
+static void emit_eq(Parser *p, int op, Expr *l, Expr r) {
+    if (fold_eq(op, l, r)) {
+        return;
+    }
+    Expr *ll = l, *rr = &r;
+    if (ll->t != EXPR_SLOT) {
+        ll = &r, rr = l; // Constant on the right
+    }
+    uint16_t d = inline_uint16_prim_num(p, rr);
+    uint8_t a = to_any_slot(p, ll);
+    if (a > d) { // Free top slot first
+        free_expr_slot(p, ll);
+        free_expr_slot(p, rr);
+    } else {
+        free_expr_slot(p, rr);
+        free_expr_slot(p, ll);
+    }
+    int bc = BINOP_BC[op] + (rr->t == EXPR_NUM) + (rr->t == EXPR_PRIM) * 2;
+    expr_new(l, EXPR_JMP);
+    emit(p, ins2(bc, a, d));
+    l->pc = emit_jmp(p);
+}
+
+static void emit_rel(Parser *p, int op, Expr *l, Expr r) {
+
+}
+
+static void emit_binop(Parser *p, int op, Expr *l, Expr r) {
+    switch (op) {
     case '+': case '-': case '*': case '/': case '%': case '^':
-        emit_arith(p, binop, l, r);
+        emit_arith(p, op, l, r);
+        break;
+    case TK_EQ: case TK_NEQ:
+        emit_eq(p, op, l, r);
+        break;
+    case '<': case TK_LE: case '>': case TK_GE:
+        emit_rel(p, op, l, r);
         break;
     default: assert(0); // TODO: remaining binops
     }
 }
+
+// Forward declaration
+static void parse_subexpr(Parser *p, Expr *l, int min_prec);
 
 static void parse_primary_expr(Parser *p, Expr *l) {
     Token tk;

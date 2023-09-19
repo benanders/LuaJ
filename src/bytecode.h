@@ -14,6 +14,12 @@
 // Opcodes are always 8 bits. Some instructions take 3 8-bit arguments, some
 // take 1 8-bit and 1 16-bit, and JMP takes a single 24-bit bytecode offset.
 
+// JMPs are relative to the PC of the instruction after the jump. The jump
+// bias is added to the signed jump offset to make it unsigned and easily
+// stored in the 24 bit E argument. The interpreter subtracts the bias to turn
+// it back into the original signed value.
+#define JMP_BIAS 0x800000
+
 #define BYTECODE       \
     X(NOP, 3)          \
                        \
@@ -40,7 +46,26 @@
     X(MODNV, 3)        \
     X(POW, 3)          \
                        \
+    /* Comparisons */  \
+    X(IST, 1)          \
+    X(ISF, 1)          \
+    X(EQVV, 2)         \
+    X(EQVN, 2)         \
+    X(EQVP, 2)         \
+    X(NEQVV, 2)        \
+    X(NEQVN, 2)        \
+    X(NEQVP, 2)        \
+    X(LTVV, 2)         \
+    X(LTVN, 2)         \
+    X(LEVV, 2)         \
+    X(LEVN, 2)         \
+    X(GTVV, 2)         \
+    X(GTVN, 2)         \
+    X(GEVV, 2)         \
+    X(GEVN, 2)         \
+                       \
     /* Control flow */ \
+    X(JMP, 1)          \
     X(RET0, 3)
 
 enum {
