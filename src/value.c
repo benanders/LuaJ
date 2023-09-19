@@ -70,3 +70,23 @@ int fn_emit_k(State *L, Fn *f, uint64_t k) {
     f->k[f->num_k++] = k;
     return f->num_k - 1;
 }
+
+char * type_name(uint64_t v) {
+    if (is_num(v)) {
+        if (is_nan(v)) {
+            return "NaN";
+        } else {
+            return "number";
+        }
+    } else if (is_nil(v)) {
+        return "nil";
+    } else if (is_false(v) || is_true(v)) {
+        return "boolean";
+    } else if (is_str(v)) {
+        return "string";
+    } else if (is_fn(v)) {
+        return "function";
+    } else {
+        return "object";
+    }
+}
