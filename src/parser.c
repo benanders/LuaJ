@@ -7,9 +7,15 @@
 #include "lexer.h"
 #include "value.h"
 
+// Used for 'BC_JMP' instructions that have been emitted but haven't had their
+// jump target set yet.
+#define JMP_NONE (-1)
+
 typedef struct BlockScope {
     struct BlockScope *outer;
     int first_local;
+    int is_loop;
+    int breaks; // Jump-list for break statements
 } BlockScope;
 
 typedef struct FnScope {
@@ -69,6 +75,12 @@ static void enter_block(Parser *p, BlockScope *b) {
     p->f->b = b;
 }
 
+static void enter_loop(Parser *p, BlockScope *b) {
+    enter_block(p, b);
+    b->is_loop = 1;
+    b->breaks = JMP_NONE;
+}
+
 static void exit_block(Parser *p) {
     assert(p->f->b);
     p->f->num_locals = p->f->num_stack = p->f->b->first_local;
@@ -105,10 +117,6 @@ static void def_local(Parser *p, Str *name) {
 // For instructions associated with an EXPR_RELOC that haven't had a destination
 // slot assigned yet.
 #define NO_SLOT 0xff
-
-// Used for 'BC_JMP' instructions that have been emitted but haven't had their
-// jump target set yet.
-#define JMP_NONE (-1)
 
 enum {
     EXPR_PRIM,
@@ -902,7 +910,6 @@ static void parse_do(Parser *p) {
     expect_tk(p->l, TK_END, NULL);
 }
 
-
 static int parse_then(Parser *p) {
     int false_list = parse_cond_expr(p);
     expect_tk(p->l, TK_THEN, NULL);
@@ -932,12 +939,43 @@ static void parse_if(Parser *p) {
     patch_jmps_here(p, end_jmps);
 }
 
+static void parse_while(Parser *p) {
+    expect_tk(p->l, TK_WHILE, NULL);
+    int start = p->f->fn->num_ins;
+    BlockScope loop;
+    enter_loop(p, &loop);
+    int cond_false_list = parse_cond_expr(p);
+    expect_tk(p->l, TK_DO, NULL);
+    parse_block(p);
+    expect_tk(p->l, TK_END, NULL);
+    int end_jmp = emit_jmp(p);
+    patch_jmps(p, end_jmp, start);
+    patch_jmps_here(p, cond_false_list);
+    exit_block(p);
+    patch_jmps_here(p, loop.breaks);
+}
+
+static void parse_repeat(Parser *p) {
+    expect_tk(p->l, TK_REPEAT, NULL);
+    int start = p->f->fn->num_ins;
+    BlockScope loop;
+    enter_loop(p, &loop);
+    parse_block(p);
+    expect_tk(p->l, TK_UNTIL, NULL);
+    int cond_false_list = parse_cond_expr(p);
+    patch_jmps(p, cond_false_list, start); // jump back if !cond
+    exit_block(p);
+    patch_jmps_here(p, loop.breaks);
+}
+
 static void parse_stmt(Parser *p) {
     switch (peek_tk(p->l, NULL)) {
-        case TK_LOCAL: parse_local(p); break;
-        case TK_DO:    parse_do(p); break;
-        case TK_IF:    parse_if(p); break;
-        default:       assert(0); // TODO
+        case TK_LOCAL:  parse_local(p); break;
+        case TK_DO:     parse_do(p); break;
+        case TK_IF:     parse_if(p); break;
+        case TK_WHILE:  parse_while(p); break;
+        case TK_REPEAT: parse_repeat(p); break;
+        default:        assert(0); // TODO
     }
 }
 
