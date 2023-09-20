@@ -87,14 +87,16 @@ static void exit_block(Parser *p) {
     p->f->b = p->f->b->outer;
 }
 
-static uint8_t reserve_slot(Parser *p) {
-    if (p->f->num_stack >= UINT8_MAX) { // 254 max (0xff is NO_SLOT)
+static uint8_t reserve_slots(Parser *p, int n) {
+    if (p->f->num_stack + n >= UINT8_MAX) { // 254 max (0xff is NO_SLOT)
         Token err;
         peek_tk(p->l, &err);
         ErrInfo info = tk2err(&err);
         err_syntax(p->L, &info, "too many local variables in function");
     }
-    return p->f->num_stack++;
+    uint8_t base = p->f->num_stack;
+    p->f->num_stack += n;
+    return base;
 }
 
 static void def_local(Parser *p, Str *name) {
@@ -121,18 +123,19 @@ static void def_local(Parser *p, Str *name) {
 enum {
     EXPR_PRIM,
     EXPR_NUM,
-    EXPR_SLOT,
+    EXPR_LOCAL,
+    EXPR_NON_RELOC,
     EXPR_RELOC,
     EXPR_JMP,
 };
 
 typedef struct {
     int t;
-    int line;
+    Token tk; // For errors
     union {
         uint16_t tag; // EXPR_PRIM
         double num;   // EXPR_NUM
-        uint8_t slot; // EXPR_SLOT
+        uint8_t slot; // EXPR_LOCAL, EXPR_NON_RELOC
         int pc;       // EXPR_RELOC, EXPR_JMP
     };
     int true_list, false_list;
@@ -227,10 +230,10 @@ static int INVERT_OP[BC_LAST] = {
     [BC_GEVV] = BC_LTVV,  [BC_GEVN] = BC_LTVN,
 };
 
-static void expr_new(Expr *e, int t, int line) {
+static void expr_new(Expr *e, int t, Token tk) {
     *e = (Expr) {0};
     e->t = t;
-    e->line = line;
+    e->tk = tk;
     e->true_list = e->false_list = JMP_NONE;
 }
 
@@ -381,6 +384,15 @@ static int jmps_need_fall_through(Parser *p, int head) {
     return 0;
 }
 
+static void discharge(Parser *p, Expr *e) {
+    switch (e->t) {
+    case EXPR_LOCAL:
+        e->t = EXPR_NON_RELOC;
+        break;
+    default: break;
+    }
+}
+
 static inline int is_int(double n, int *i) {
     lua_number2int(*i, n);
     return n == *i;
@@ -388,22 +400,23 @@ static inline int is_int(double n, int *i) {
 
 // Stores the result of an expression into a specific stack slot.
 static void to_slot(Parser *p, Expr *e, uint8_t dst) {
+    discharge(p, e);
     int i;
     switch (e->t) {
     case EXPR_PRIM:
-        emit(p, ins2(BC_KPRIM, dst, e->tag), e->line);
+        emit(p, ins2(BC_KPRIM, dst, e->tag), e->tk.line);
         break;
     case EXPR_NUM:
         if (is_int(e->num, &i) && i <= UINT16_MAX) {
-            emit(p, ins2(BC_KINT, dst, (uint16_t) i), e->line);
+            emit(p, ins2(BC_KINT, dst, (uint16_t) i), e->tk.line);
         } else {
             uint16_t idx = emit_k(p, n2v(e->num));
-            emit(p, ins2(BC_KNUM, dst, idx), e->line);
+            emit(p, ins2(BC_KNUM, dst, idx), e->tk.line);
         }
         break;
-    case EXPR_SLOT:
+    case EXPR_NON_RELOC:
         if (dst != e->slot) {
-            emit(p, ins2(BC_MOV, dst, e->slot), e->line);
+            emit(p, ins2(BC_MOV, dst, e->slot), e->tk.line);
         }
         break;
     case EXPR_RELOC:
@@ -419,9 +432,9 @@ static void to_slot(Parser *p, Expr *e, uint8_t dst) {
         if (jmps_need_fall_through(p, e->true_list) ||
             jmps_need_fall_through(p, e->false_list)) {
             int before = (e->t != EXPR_JMP) ? emit_jmp(p) : JMP_NONE;
-            false_case = emit(p, ins2(BC_KPRIM, dst, TAG_FALSE), e->line);
+            false_case = emit(p, ins2(BC_KPRIM, dst, TAG_FALSE), e->tk.line);
             int middle = emit_jmp(p);
-            true_case = emit(p, ins2(BC_KPRIM, dst, TAG_TRUE), e->line);
+            true_case = emit(p, ins2(BC_KPRIM, dst, TAG_TRUE), e->tk.line);
             patch_jmps_here(p, before);
             patch_jmps_here(p, middle);
         }
@@ -429,14 +442,14 @@ static void to_slot(Parser *p, Expr *e, uint8_t dst) {
         patch_jmps_and_vals(p, e->true_list, true_case, dst, after);
         patch_jmps_and_vals(p, e->false_list, false_case, dst, after);
     }
-    expr_new(e, EXPR_SLOT, e->line);
+    expr_new(e, EXPR_NON_RELOC, e->tk);
     e->slot = dst;
 }
 
 // When calling this function, we know we won't be using 'e's stack slot again.
 // If 'e' is at the top of the stack, we can re-use it.
 static void free_expr_slot(Parser *p, Expr *e) {
-    if (e->t == EXPR_SLOT && e->slot >= p->f->num_locals) {
+    if (e->t == EXPR_NON_RELOC && e->slot >= p->f->num_locals) {
         p->f->num_stack--;
         assert(e->slot == p->f->num_stack); // Make sure we freed the stack top
     }
@@ -445,8 +458,9 @@ static void free_expr_slot(Parser *p, Expr *e) {
 // Stores the result of an expression into the next available stack slot (e.g.,
 // when assigning a local).
 static uint8_t to_next_slot(Parser *p, Expr *e) {
+    discharge(p, e);
     free_expr_slot(p, e);
-    uint8_t dst = reserve_slot(p);
+    uint8_t dst = reserve_slots(p, 1);
     to_slot(p, e, dst);
     return dst;
 }
@@ -455,8 +469,9 @@ static uint8_t to_next_slot(Parser *p, Expr *e) {
 // means expressions already allocated a slot aren't moved, and everything else
 // is allocated a new slot.
 static uint8_t to_any_slot(Parser *p, Expr *e) {
+    discharge(p, e);
     // Local variables with jumps associated need to have 'to_next_slot' called
-    if (e->t == EXPR_SLOT && !(has_jmp(e) && e->slot < p->f->num_locals)) {
+    if (e->t == EXPR_NON_RELOC && !(has_jmp(e) && e->slot < p->f->num_locals)) {
         to_slot(p, e, e->slot);
         return e->slot;
     }
@@ -502,7 +517,7 @@ static int fold_unop(int op, Expr *l) {
             return 0;
         }
         double v = -l->num;
-        expr_new(l, EXPR_NUM, l->line);
+        expr_new(l, EXPR_NUM, l->tk);
         l->num = v;
         return 1;
     case TK_NOT:
@@ -510,7 +525,7 @@ static int fold_unop(int op, Expr *l) {
             return 0;
         }
         int t = l->t == EXPR_NUM || (l->t == EXPR_PRIM && l->tag == TAG_TRUE);
-        expr_new(l, EXPR_PRIM, l->line);
+        expr_new(l, EXPR_PRIM, l->tk);
         l->tag = t ? TAG_TRUE : TAG_FALSE;
         return 1;
     default: assert(0); // TODO: remaining unops (len)
@@ -527,6 +542,7 @@ static void emit_unop(Parser *p, Token *op, Expr *l) {
         l->false_list = tmp;
         discard_vals(p, l->true_list);
         discard_vals(p, l->false_list);
+        discharge(p, l);
         if (l->t == EXPR_JMP) {
             invert_cond(p, l->pc);
             return;
@@ -534,7 +550,7 @@ static void emit_unop(Parser *p, Token *op, Expr *l) {
     }
     uint8_t d = to_any_slot(p, l); // Must be in a slot
     free_expr_slot(p, l);
-    expr_new(l, EXPR_RELOC, op->line);
+    expr_new(l, EXPR_RELOC, *op);
     l->pc = emit(p, ins2(UNOP_BC[op->t], NO_SLOT, d), op->line);
 }
 
@@ -542,6 +558,7 @@ static void emit_unop(Parser *p, Token *op, Expr *l) {
 // jump list. Patches the expression's true jump list to the instruction after
 // the emitted branch.
 static void emit_branch_true(Parser *p, Expr *l, int line) {
+    discharge(p, l);
     int to_add;
     switch (l->t) {
     case EXPR_PRIM:
@@ -574,6 +591,7 @@ static void emit_branch_true(Parser *p, Expr *l, int line) {
 // jump list. Patches the expression's false jump list to the instruction after
 // the emitted branch.
 static void emit_branch_false(Parser *p, Expr *l, int line) {
+    discharge(p, l);
     int to_add;
     switch (l->t) {
     case EXPR_PRIM:
@@ -633,7 +651,7 @@ static int fold_arith(Token *op, Expr *l, Expr r) {
         case '^': v = pow(a, b);  break;
         default:  UNREACHABLE();
     }
-    expr_new(l, EXPR_NUM, op->line);
+    expr_new(l, EXPR_NUM, *op);
     l->num = v;
     return 1;
 }
@@ -643,7 +661,7 @@ static void emit_arith(Parser *p, Token *op, Expr *l, Expr r) {
         return;
     }
     Expr *ll = l, *rr = &r;
-    if (IS_COMMUTATIVE[op->t] && ll->t != EXPR_SLOT) {
+    if (IS_COMMUTATIVE[op->t] && ll->t != EXPR_NON_RELOC) {
         ll = &r, rr = l; // Constant on the right
     }
     uint8_t b, c;
@@ -662,7 +680,7 @@ static void emit_arith(Parser *p, Token *op, Expr *l, Expr r) {
         free_expr_slot(p, ll);
     }
     int bc = BINOP_BC[op->t] + (rr->t == EXPR_NUM) + (ll->t == EXPR_NUM) * 2;
-    expr_new(l, EXPR_RELOC, op->line);
+    expr_new(l, EXPR_RELOC, *op);
     l->pc = emit(p, ins3(bc, NO_SLOT, b, c), op->line);
 }
 
@@ -679,7 +697,7 @@ static int fold_eq(Token *op, Expr *l, Expr r) {
         uint16_t tag = l->t == EXPR_PRIM ? l->tag : r.tag;
         v = (op->t == TK_NEQ) ^ (tag == TAG_TRUE);
     }
-    expr_new(l, EXPR_PRIM, op->line);
+    expr_new(l, EXPR_PRIM, *op);
     l->tag = v ? TAG_TRUE : TAG_FALSE;
     return 1;
 }
@@ -689,7 +707,7 @@ static void emit_eq(Parser *p, Token *op, Expr *l, Expr r) {
         return;
     }
     Expr *ll = l, *rr = &r;
-    if (ll->t != EXPR_SLOT) {
+    if (ll->t != EXPR_NON_RELOC) {
         ll = &r, rr = l; // Constant on the right
     }
     uint16_t d = inline_uint16_prim_num(p, rr);
@@ -702,7 +720,7 @@ static void emit_eq(Parser *p, Token *op, Expr *l, Expr r) {
         free_expr_slot(p, ll);
     }
     int bc = BINOP_BC[op->t] + (rr->t == EXPR_NUM) + (rr->t == EXPR_PRIM) * 2;
-    expr_new(l, EXPR_JMP, op->line);
+    expr_new(l, EXPR_JMP, *op);
     emit(p, ins2(bc, a, d), op->line);
     l->pc = emit_jmp(p);
 }
@@ -720,7 +738,7 @@ static int fold_rel(Token *op, Expr *l, Expr r) {
         case TK_GE: v = a >= b; break;
         default:  UNREACHABLE();
     }
-    expr_new(l, EXPR_PRIM, op->line);
+    expr_new(l, EXPR_PRIM, *op);
     l->tag = v ? TAG_TRUE : TAG_FALSE;
     return 1;
 }
@@ -731,7 +749,7 @@ static void emit_rel(Parser *p, Token *op, Expr *l, Expr r) {
     }
     int op_t = op->t;
     Expr *ll = l, *rr = &r;
-    if (ll->t != EXPR_SLOT) {
+    if (ll->t != EXPR_NON_RELOC) {
         ll = &r, rr = l; // Constant on the right
         op_t = INVERT_TK[op_t];
     }
@@ -745,19 +763,21 @@ static void emit_rel(Parser *p, Token *op, Expr *l, Expr r) {
         free_expr_slot(p, ll);
     }
     int bc = BINOP_BC[op_t] + (rr->t == EXPR_NUM);
-    expr_new(l, EXPR_JMP, op->line);
+    expr_new(l, EXPR_JMP, *op);
     emit(p, ins2(bc, a, d), op->line);
     l->pc = emit_jmp(p);
 }
 
 static void emit_and(Parser *p, Expr *l, Expr r) {
     assert(l->true_list == JMP_NONE); // Patched by 'emit_and_left'
+    discharge(p, &r);
     append_jmp(p, &r.false_list, l->false_list);
     *l = r;
 }
 
 static void emit_or(Parser *p, Expr *l, Expr r) {
     assert(l->false_list == JMP_NONE); // Patched by 'emit_or_left'
+    discharge(p, &r);
     append_jmp(p, &r.true_list, l->true_list);
     *l = r;
 }
@@ -784,7 +804,7 @@ static void find_var(Parser *p, Expr *e, Token *name) {
         Str *l = p->f->locals[i];
         if (name->s->len == l->len &&
                 strncmp(str_val(name->s), str_val(l), l->len) == 0) {
-            expr_new(e, EXPR_SLOT, name->line);
+            expr_new(e, EXPR_LOCAL, *name);
             e->slot = i;
             return;
         }
@@ -818,19 +838,19 @@ static void parse_operand(Parser *p, Expr *l) {
     Token tk;
     switch (peek_tk(p->l, &tk)) {
     case TK_NIL:
-        expr_new(l, EXPR_PRIM, tk.line);
+        expr_new(l, EXPR_PRIM, tk);
         l->tag = TAG_NIL;
         break;
     case TK_TRUE:
-        expr_new(l, EXPR_PRIM, tk.line);
+        expr_new(l, EXPR_PRIM, tk);
         l->tag = TAG_TRUE;
         break;
     case TK_FALSE:
-        expr_new(l, EXPR_PRIM, tk.line);
+        expr_new(l, EXPR_PRIM, tk);
         l->tag = TAG_FALSE;
         break;
     case TK_NUM:
-        expr_new(l, EXPR_NUM, tk.line);
+        expr_new(l, EXPR_NUM, tk);
         l->num = tk.num;
         break;
     default:
@@ -888,7 +908,7 @@ static int parse_cond_expr(Parser *p) {
     if (cond.t == EXPR_PRIM && cond.tag == TAG_NIL) {
         cond.tag = TAG_FALSE;
     }
-    emit_branch_true(p, &cond, cond.line);
+    emit_branch_true(p, &cond, cond.tk.line);
     return cond.false_list;
 }
 
@@ -904,6 +924,7 @@ static void emit_knil(Parser *p, uint8_t base, int n, int line) {
     } else {
         emit(p, ins2(BC_KNIL, base, base + n - 1), line);
     }
+    reserve_slots(p, n);
 }
 
 static void parse_local_def(Parser *p) {
@@ -951,6 +972,10 @@ static void parse_local(Parser *p) {
 }
 
 static void parse_assign(Parser *p, Expr l) {
+    if (l.t != EXPR_LOCAL) {
+        ErrInfo info = tk2err(&l.tk);
+        err_syntax(p->L, &info, "unexpected symbol");
+    }
     int num_vars = 1;
     Expr vars[LUAI_MAXVARS];
     vars[0] = l;
@@ -963,29 +988,32 @@ static void parse_assign(Parser *p, Expr l) {
             err_syntax(p->L, &info, "too many variables in assignment");
         }
         parse_primary_expr(p, &l);
+        if (l.t != EXPR_LOCAL) {
+            ErrInfo info = tk2err(&l.tk);
+            err_syntax(p->L, &info, "expected variable in assignment");
+        }
         vars[num_vars++] = l;
     }
     Token assign;
     expect_tk(p->l, '=', &assign);
     Expr r;
     int num_exprs = parse_expr_list(p, &r);
-    if (num_vars > num_exprs) { // Fill extra with nil
+    if (num_vars > num_exprs) {
         to_next_slot(p, &r); // Contiguous expression slots
         int extra = num_vars - num_exprs;
-        emit_knil(p, p->f->num_stack, extra, assign.line);
-    } else if (num_exprs > num_vars) { // Get rid of extras
+        emit_knil(p, p->f->num_stack, extra, assign.line); // Fill extras
+    } else if (num_exprs > num_vars) {
+        to_next_slot(p, &r); // Contiguous expression slots
         int extra = num_exprs - num_vars;
-        p->f->num_stack -= extra;
+        p->f->num_stack -= extra; // Get rid of extras
     } else { // num_vars == num_exprs
         // Put the last expression directly into the last variable's slot
         Expr *last_var = &vars[num_vars - 1];
-        assert(last_var->t == EXPR_SLOT);
         to_slot(p, &r, last_var->slot);
         num_vars--; num_exprs--;
     }
     for (int i = num_vars - 1; i >= 0; i--) {
         Expr *var = &vars[i];
-        assert(var->t == EXPR_SLOT);
         uint8_t expr_slot = p->f->num_stack - num_vars + i;
         emit(p, ins2(BC_MOV, var->slot, expr_slot), assign.line);
     }
