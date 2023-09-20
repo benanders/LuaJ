@@ -27,9 +27,11 @@ void str_free(State *L, Str *str) {
     obj_free(L, (Obj *) str, sizeof(Str) + sizeof(char) * str->len);
 }
 
-Fn * fn_new(State *L, char *chunk_name) {
+Fn * fn_new(State *L, Str *fn_name, char *chunk_name) {
     Fn *f = (Fn *) obj_new(L, OBJ_FN, sizeof(Fn));
+    f->name = fn_name;
     f->chunk_name = chunk_name;
+    f->start_line = f->end_line = -1;
     f->num_params = 0;
     f->num_ins = 0;
     f->max_ins = 64;

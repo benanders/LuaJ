@@ -25,9 +25,10 @@
                        \
     /* Storage */      \
     X(MOV, 2)          \
+    X(KPRIM, 2)        \
     X(KINT, 2)         \
     X(KNUM, 2)         \
-    X(KPRIM, 2)        \
+    X(KFN, 2)          \
     X(KNIL, 2)         \
                        \
     /* Arithmetic */   \

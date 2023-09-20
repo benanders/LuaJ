@@ -65,14 +65,15 @@ OP_NOP:
 OP_MOV:
     s[bc_a(*ip)] = s[bc_d(*ip)];
     NEXT();
+OP_KPRIM:
+    s[bc_a(*ip)] = prim2v(bc_d(*ip));
+    NEXT();
 OP_KINT:
     s[bc_a(*ip)] = n2v((double) bc_d(*ip));
     NEXT();
 OP_KNUM:
+OP_KFN:
     s[bc_a(*ip)] = k[bc_d(*ip)];
-    NEXT();
-OP_KPRIM:
-    s[bc_a(*ip)] = prim2v(bc_d(*ip));
     NEXT();
 OP_KNIL:
     for (int n = bc_a(*ip); n <= bc_d(*ip); n++) {

@@ -54,16 +54,18 @@ static int emit_k(Parser *p, uint64_t k) {
     return idx;
 }
 
-static void enter_fn(Parser *p, FnScope *f) {
+static void enter_fn(Parser *p, FnScope *f, Str *name, int start_line) {
     *f = (FnScope) {0};
     f->outer = p->f;
     p->f = f;
-    f->fn = fn_new(p->L, p->l->r->chunk_name);
+    f->fn = fn_new(p->L, name, p->l->r->chunk_name);
+    f->fn->start_line = start_line;
 }
 
-static void exit_fn(Parser *p) {
+static void exit_fn(Parser *p, int end_line) {
     assert(p->f);
-    emit(p, ins0(BC_RET0), -1);
+    p->f->fn->end_line = end_line;
+    emit(p, ins0(BC_RET0), end_line);
     p->f = p->f->outer;
 }
 
@@ -124,9 +126,9 @@ enum {
     EXPR_PRIM,
     EXPR_NUM,
     EXPR_LOCAL,
-    EXPR_NON_RELOC,
-    EXPR_RELOC,
-    EXPR_JMP,
+    EXPR_NON_RELOC, // An expression result in a fixed stack slot
+    EXPR_RELOC,     // An instruction without an assigned stack slot
+    EXPR_JMP,       // A condition expression
 };
 
 typedef struct {
@@ -402,6 +404,7 @@ static inline int is_int(double n, int *i) {
 static void to_slot(Parser *p, Expr *e, uint8_t dst) {
     discharge(p, e);
     int i;
+    uint16_t idx;
     switch (e->t) {
     case EXPR_PRIM:
         emit(p, ins2(BC_KPRIM, dst, e->tag), e->tk.line);
@@ -410,7 +413,7 @@ static void to_slot(Parser *p, Expr *e, uint8_t dst) {
         if (is_int(e->num, &i) && i <= UINT16_MAX) {
             emit(p, ins2(BC_KINT, dst, (uint16_t) i), e->tk.line);
         } else {
-            uint16_t idx = emit_k(p, n2v(e->num));
+            idx = emit_k(p, n2v(e->num));
             emit(p, ins2(BC_KNUM, dst, idx), e->tk.line);
         }
         break;
@@ -812,8 +815,40 @@ static void find_var(Parser *p, Expr *e, Token *name) {
     assert(0); // TODO: upvalues and globals
 }
 
-// Forward declaration
+// Forward declarations
+static void parse_block(Parser *p);
 static void parse_subexpr(Parser *p, Expr *l, int min_prec);
+
+static int parse_params(Parser *p) {
+    expect_tk(p->l, '(', NULL);
+    int num_params = 0;
+    Token name;
+    while (peek_tk(p->l, &name) == TK_IDENT) {
+        read_tk(p->l, NULL);
+        def_local(p, name.s);
+        reserve_slots(p, 1);
+        if (peek_tk(p->l, NULL) == ',') {
+            read_tk(p->l, NULL);
+        } else {
+            break;
+        }
+    }
+    expect_tk(p->l, ')', NULL);
+    return num_params;
+}
+
+static void parse_fn_body(Parser *p, Expr *l, Token *fn_tk, Str *fn_name) {
+    FnScope f;
+    enter_fn(p, &f, fn_name, fn_tk->line);
+    f.fn->num_params = parse_params(p);
+    parse_block(p);
+    Token end_tk;
+    expect_tk(p->l, TK_END, &end_tk);
+    exit_fn(p, end_tk.line);
+    uint16_t idx = emit_k(p, fn2v(f.fn));
+    expr_new(l, EXPR_RELOC, *fn_tk);
+    l->pc = emit(p, ins2(BC_KFN, NO_SLOT, idx), fn_tk->line);
+}
 
 static void parse_primary_expr(Parser *p, Expr *l) {
     Token tk;
@@ -853,6 +888,10 @@ static void parse_operand(Parser *p, Expr *l) {
         expr_new(l, EXPR_NUM, tk);
         l->num = tk.num;
         break;
+    case TK_FUNCTION:
+        read_tk(p->l, NULL); // Skip 'function'
+        parse_fn_body(p, l, &tk, NULL);
+        return;
     default:
         parse_primary_expr(p, l);
         return;
@@ -915,7 +954,16 @@ static int parse_cond_expr(Parser *p) {
 
 // ---- Statements ----
 
-static void parse_block(Parser *p); // Forward declaration
+static void parse_local_fn_def(Parser *p) {
+    Token fn_tk;
+    expect_tk(p->l, TK_FUNCTION, &fn_tk);
+    Token name;
+    expect_tk(p->l, TK_IDENT, &name);
+    def_local(p, name.s); // Def before body to allow recursion
+    Expr l;
+    parse_fn_body(p, &l, &fn_tk, name.s);
+    to_next_slot(p, &l);
+}
 
 static void emit_knil(Parser *p, uint8_t base, int n, int line) {
     // TODO: combine with previous knil/kprim instructions
@@ -965,7 +1013,7 @@ static void parse_local_def(Parser *p) {
 static void parse_local(Parser *p) {
     expect_tk(p->l, TK_LOCAL, NULL);
     if (peek_tk(p->l, NULL) == TK_FUNCTION) {
-        assert(0); // TODO
+        parse_local_fn_def(p);
     } else {
         parse_local_def(p);
     }
@@ -1167,10 +1215,14 @@ static void parse_block(Parser *p) {
 void parse(State *L, Reader *r) {
     Lexer l = lexer_new(L, r);
     Parser p = parser_new(L, &l);
+    Token first_tk;
+    peek_tk(&l, &first_tk);
     FnScope top_level;
-    enter_fn(&p, &top_level);
+    enter_fn(&p, &top_level, NULL, first_tk.line);
     parse_block(&p);
-    exit_fn(&p);
+    Token last_tk;
+    peek_tk(&l, &last_tk);
+    exit_fn(&p, last_tk.line);
     assert(!p.f);
     stack_push(L, fn2v(top_level.fn));
 }

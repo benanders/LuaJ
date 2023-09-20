@@ -14,6 +14,25 @@ static DebugInfo BC_DEBUG_INFO[] = {
 #undef X
 };
 
+static void print_fn_name(Fn *f) {
+    if (f->name) {
+        printf("%.*s", (int) f->name->len, str_val(f->name));
+    } else {
+        printf("<unknown>");
+    }
+    if (f->chunk_name) {
+        printf("@%s", f->chunk_name);
+    } else {
+        printf("@<unknown>");
+    }
+    if (f->start_line >= 1) {
+        printf(":%d", f->start_line);
+    }
+    if (f->end_line >= f->start_line) {
+        printf("-%d", f->end_line);
+    }
+}
+
 static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     printf("%.4d", idx);
     int op = bc_op(*ins);
@@ -41,6 +60,10 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
             case TAG_FALSE: printf("false"); break;
         }
         break;
+    case BC_KFN:
+        printf("\t; ");
+        print_fn_name(v2fn(f->k[bc_d(*ins)]));
+        break;
     case BC_SUBNV: case BC_DIVNV: case BC_MODNV:
         printf("\t; %g", v2n(f->k[bc_b(*ins)]));
         break;
@@ -63,7 +86,9 @@ static void print_bc(State *L, Fn *f) {
 }
 
 void print_fn(State *L, Fn *f) {
-    printf("-- func --\n");
+    printf("-- ");
+    print_fn_name(f);
+    printf(" --\n");
     print_bc(L, f);
     for (int i = 0; i < f->num_k; i++) {
         if (is_fn(f->k[i])) {

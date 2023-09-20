@@ -122,7 +122,9 @@ static inline char * str_val(Str *s)  { return (char *) (s + 1); }
 // Function prototype.
 typedef struct {
     ObjHeader;
+    Str *name;
     char *chunk_name;
+    int start_line, end_line;
     int num_params;
     BcIns *ins;
     int *line_info;
@@ -131,7 +133,7 @@ typedef struct {
     int num_k, max_k;
 } Fn;
 
-Fn * fn_new(State *L, char *chunk_name);
+Fn * fn_new(State *L, Str *fn_name, char *chunk_name);
 void fn_free(State *L, Fn *f);
 int fn_emit(State *L, Fn *f, BcIns ins, int line);
 int fn_emit_k(State *L, Fn *f, uint64_t k);
