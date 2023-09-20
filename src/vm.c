@@ -140,8 +140,23 @@ OP_POW:
 OP_IST:
     if (!compares_true(s[bc_d(*ip)])) { ip++; }
     NEXT();
+OP_ISTC:
+    if (!compares_true(s[bc_d(*ip)])) {
+        ip++;
+    } else {
+        s[bc_a(*ip)] = s[bc_d(*ip)];
+    }
+    NEXT();
+
 OP_ISF:
     if (compares_true(s[bc_d(*ip)])) { ip++; }
+    NEXT();
+OP_ISFC:
+    if (compares_true(s[bc_d(*ip)])) {
+        ip++;
+    } else {
+        s[bc_a(*ip)] = s[bc_d(*ip)];
+    }
     NEXT();
 
 OP_EQVV:

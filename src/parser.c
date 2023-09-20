@@ -31,7 +31,7 @@ typedef struct {
         uint8_t slot; // EXPR_SLOT
         int pc;       // EXPR_RELOC, EXPR_JMP
     };
-    int true, false;
+    int true_list, false_list;
 } Expr;
 
 typedef struct BlockScope {
@@ -63,7 +63,7 @@ static Parser parser_new(State *L, Lexer *l) {
 static void expr_new(Expr *e, int t) {
     *e = (Expr) {0};
     e->t = t;
-    e->true = e->false = JMP_NONE;
+    e->true_list = e->false_list = JMP_NONE;
 }
 
 static int emit(Parser *p, BcIns ins) {
@@ -179,7 +179,9 @@ enum {
     X('<',    PREC_CMP, BC_LTVV,  0, 0) \
     X(TK_LE,  PREC_CMP, BC_LEVV,  0, 0) \
     X('>',    PREC_CMP, BC_GTVV,  0, 0) \
-    X(TK_GE,  PREC_CMP, BC_GEVV,  0, 0)
+    X(TK_GE,  PREC_CMP, BC_GEVV,  0, 0) \
+    X(TK_AND, PREC_AND, BC_NOP,   0, 0) \
+    X(TK_OR,  PREC_OR,  BC_NOP,   0, 0)
 
 static int BINOP_PREC[TK_LAST] = {
 #define X(tk, prec, _, __, ___) [tk] = prec,
@@ -223,12 +225,23 @@ static int INVERT_TK[TK_LAST] = {
     ['>'] = TK_LE, [TK_GE] = '<',
 };
 
+static int INVERT_OP[BC_LAST] = {
+    [BC_IST] = BC_ISF, [BC_ISTC] = BC_ISFC,
+    [BC_ISF] = BC_IST, [BC_ISFC] = BC_ISTC,
+    [BC_EQVV] = BC_NEQVV, [BC_EQVN] = BC_NEQVN, [BC_EQVP] = BC_NEQVP,
+    [BC_NEQVV] = BC_EQVV, [BC_NEQVN] = BC_EQVN, [BC_NEQVP] = BC_EQVP,
+    [BC_LTVV] = BC_GEVV, [BC_LTVN] = BC_GEVN,
+    [BC_LEVV] = BC_GTVV, [BC_LEVN] = BC_GTVN,
+    [BC_GTVV] = BC_LEVV, [BC_GTVN] = BC_LEVN,
+    [BC_GEVV] = BC_LTVV, [BC_GEVN] = BC_LTVN,
+};
+
 static inline int is_int(double n, int *i) {
     lua_number2int(*i, n);
     return n == *i;
 }
 
-static void set_jmp_target(Parser *p, int jmp, int target) {
+static void patch_jmp(Parser *p, int jmp, int target) {
     if (jmp == JMP_NONE) {
         return;
     }
@@ -243,7 +256,7 @@ static void set_jmp_target(Parser *p, int jmp, int target) {
     bc_set_e(ins, (uint32_t) offset);
 }
 
-static int get_jmp_target(Parser *p, int jmp) {
+static int follow_jmp(Parser *p, int jmp) {
     assert(jmp != JMP_NONE);
     BcIns *ins = &p->f->fn->ins[jmp];
     int delta = (int) bc_e(*ins);
@@ -252,19 +265,19 @@ static int get_jmp_target(Parser *p, int jmp) {
 
 static int emit_jmp(Parser *p) {
     int pc = emit(p, ins0(BC_JMP));
-    set_jmp_target(p, pc, JMP_NONE);
+    patch_jmp(p, pc, JMP_NONE);
     return pc;
 }
 
 // Is there a jump list associated with the expression value?
 static int has_jmp(Expr *e) {
-    return e->true != JMP_NONE || e->false != JMP_NONE;
+    return e->true_list != JMP_NONE || e->false_list != JMP_NONE;
 }
 
 // Add a jump list (or single jump instruction) to a jump list. 'head'
 // specifies a jump list. This function puts 'to_add' at the start of the
 // 'head' jump list.
-static void add_jmp_to_list(Parser *p, int *head, int to_add) {
+static void append_jmp(Parser *p, int *head, int to_add) {
     if (to_add == JMP_NONE) { // Nothing to add
         return;
     }
@@ -272,20 +285,96 @@ static void add_jmp_to_list(Parser *p, int *head, int to_add) {
         *head = to_add;
         return;
     }
-    while (get_jmp_target(p, to_add) != JMP_NONE) { // Find end of 'to_add' list
-        to_add = get_jmp_target(p, to_add);
+    while (follow_jmp(p, to_add) != JMP_NONE) { // Find end of 'to_add' list
+        to_add = follow_jmp(p, to_add);
     }
-    set_jmp_target(p, to_add, *head);
+    patch_jmp(p, to_add, *head);
     *head = to_add;
 }
 
-// Set the jump target for every jump in the jump list to 'target'.
-static void patch_jmp_list(Parser *p, int head, int target) {
+// Discards a value associated with a jump. E.g., in '3 or x', we discard the
+// jump associated with '3' (KINT). Returns 1 if there was a value to discard.
+static int discard_value(Parser *p, int jmp) {
+    BcIns *cond = &p->f->fn->ins[jmp > 0 ? jmp - 1 : 0];
+    if (bc_op(*cond) == BC_ISTC || bc_op(*cond) == BC_ISFC) {
+        bc_set_op(cond, bc_op(*cond) - 1); // ISTC -> IST or ISFC -> ISF
+        bc_set_a(cond, 0);
+        return 1;
+    } else if (bc_a(*cond) == NO_SLOT) { // RELOC
+        *cond = ins0(BC_NOP); // Make the jump unconditional
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+static void discard_values(Parser *p, int head) {
     while (head != JMP_NONE) {
-        int next = get_jmp_target(p, head);
-        set_jmp_target(p, head, target);
+        discard_value(p, head);
+        head = follow_jmp(p, head);
+    }
+}
+
+// Patches the destination slot for a value associated with a jump (e.g., in
+// 'x and 3'). Returns 1 if there was a value to patch.
+static int patch_value(Parser *p, int jmp, uint8_t dst) {
+    BcIns *cond = &p->f->fn->ins[jmp > 0 ? jmp - 1 : 0];
+    if (dst == NO_SLOT) {
+        return discard_value(p, jmp);
+    } else if (bc_op(*cond) == BC_ISTC || bc_op(*cond) == BC_ISFC ||
+            bc_a(*cond) == NO_SLOT) { // Is there a value to patch?
+        bc_set_a(cond, dst);
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+// Iterates over the jump list. For jumps in the jump list that don't have a
+// value associated with them, patches them to 'jmp_target'. For jumps that
+// have an associated value, stores the value into 'dst' and patches the jump
+// to 'val_target'.
+//
+// E.g., in 'a and b == 3 or c + 3', the 'a' and 'c' conditions (ISFC/ISTC/ADD)
+// have their first operand set to 'dst' and have their jumps patched to
+// 'val_target'. The 'b == 3' condition (EQVN) has its jump patched to
+// 'jmp_target'.
+static void patch_jmps_and_vals(
+        Parser *p,
+        int head,
+        int jmp_target,
+        uint8_t dst,
+        int val_target) {
+    while (head != JMP_NONE) {
+        int next = follow_jmp(p, head);
+        if (patch_value(p, head, dst)) {
+            patch_jmp(p, head, val_target);
+        } else {
+            patch_jmp(p, head, jmp_target);
+        }
         head = next;
     }
+}
+
+static void patch_jmps(Parser *p, int head, int target) {
+    patch_jmps_and_vals(p, head, target, NO_SLOT, target);
+}
+
+// Checks to see if all jumps in the jump list have a value associated with
+// them, or if any are just pure conditions.
+//
+// E.g., the true and false jump lists for 'a and b + 3 or c' all have values
+// associated with them. 'a and b == 3 or c' doesn't.
+static int needs_fall_through(Parser *p, int head) {
+    while (head != JMP_NONE) {
+        BcIns *cond = &p->f->fn->ins[head > 0 ? head - 1 : 0];
+        uint8_t op = bc_op(*cond);
+        if (!(op == BC_ISTC || op == BC_ISFC || bc_a(*cond) == NO_SLOT)) {
+            return 1;
+        }
+        head = follow_jmp(p, head);
+    }
+    return 0;
 }
 
 // Stores the result of an expression into a specific stack slot.
@@ -314,18 +403,23 @@ static void to_slot(Parser *p, Expr *e, uint8_t dst) {
     default: break;
     }
     if (e->t == EXPR_JMP) {
-        add_jmp_to_list(p, &e->true, e->pc);
+        append_jmp(p, &e->true_list, e->pc);
     }
     if (has_jmp(e)) {
-        int before = (e->t != EXPR_JMP) ? emit_jmp(p) : JMP_NONE;
-        int false = emit(p, ins2(BC_KPRIM, dst, TAG_FALSE));
-        int middle = emit_jmp(p);
-        int true = emit(p, ins2(BC_KPRIM, dst, TAG_TRUE));
-        int end = p->f->fn->num_ins;
-        set_jmp_target(p, before, end);
-        set_jmp_target(p, middle, end);
-        patch_jmp_list(p, e->true, true);
-        patch_jmp_list(p, e->false, false);
+        int true_case = JMP_NONE, false_case = JMP_NONE;
+        if (needs_fall_through(p, e->true_list) ||
+                needs_fall_through(p, e->false_list)) {
+            int before = (e->t != EXPR_JMP) ? emit_jmp(p) : JMP_NONE;
+            false_case = emit(p, ins2(BC_KPRIM, dst, TAG_FALSE));
+            int middle = emit_jmp(p);
+            true_case = emit(p, ins2(BC_KPRIM, dst, TAG_TRUE));
+            int after = p->f->fn->num_ins;
+            patch_jmp(p, before, after);
+            patch_jmp(p, middle, after);
+        }
+        int after = p->f->fn->num_ins;
+        patch_jmps_and_vals(p, e->true_list, true_case, dst, after);
+        patch_jmps_and_vals(p, e->false_list, false_case, dst, after);
     }
     expr_new(e, EXPR_SLOT);
     e->slot = dst;
@@ -408,6 +502,73 @@ static void emit_unop(Parser *p, int op, Expr *l) {
     l->pc = emit(p, ins2(UNOP_BC[op], NO_SLOT, d));
 }
 
+static void invert_cond(Parser *p, int jmp) {
+    BcIns *cond = &p->f->fn->ins[jmp - 1];
+    int inverted = INVERT_OP[bc_op(*cond)];
+    bc_set_op(cond, inverted);
+}
+
+// Emits a branch on the "truthiness" of 'l' and adds this jump to 'l's false
+// jump list. Patches the expression's true jump list to the instruction after
+// the emitted branch.
+static void emit_and_left(Parser *p, Expr *l) {
+    int to_add;
+    switch (l->t) {
+    case EXPR_PRIM:
+        if (l->tag == TAG_FALSE || l->tag == TAG_NIL) {
+            // 'false and x' always evaluates to false
+            to_slot(p, l, NO_SLOT); // Discard values
+            to_add = emit_jmp(p);   // Unconditional jump to the false case
+            break;
+        } // 'true and x' always evaluates to 'x' -> fall through...
+    case EXPR_NUM: // '3 and x' always evaluates to 'x'
+        to_add = JMP_NONE;
+        break;
+    case EXPR_JMP: // Branch already emitted
+        invert_cond(p, l->pc);
+        to_add = l->pc;
+        break;
+    default:
+        emit(p, ins2(BC_ISFC, NO_SLOT, to_any_slot(p, l)));
+        to_add = emit_jmp(p);
+        free_expr_slot(p, l);
+        break;
+    }
+    append_jmp(p, &l->false_list, to_add);
+    int next = p->f->fn->num_ins;
+    patch_jmps(p, l->true_list, next);
+    l->true_list = JMP_NONE;
+}
+
+// Emits a branch on the "truthiness" of 'l' and patches the expression's false
+// jump list to the instruction after.
+static void emit_or_left(Parser *p, Expr *l) {
+    int to_add;
+    switch (l->t) {
+    case EXPR_PRIM:
+        if (l->tag == TAG_FALSE || l->tag == TAG_NIL) {
+            // 'false or x' always evaluates to 'x'
+            to_add = JMP_NONE;
+        } // 'true and x' always evaluates to 'x' -> fall through...
+    case EXPR_NUM: // '3 or x' always evaluates to '3'
+        to_slot(p, l, NO_SLOT); // Discard values
+        to_add = emit_jmp(p);   // Unconditional jump to the true case
+        break;
+    case EXPR_JMP: // Branch already emitted
+        to_add = l->pc;
+        break;
+    default:
+        emit(p, ins2(BC_ISTC, NO_SLOT, to_any_slot(p, l)));
+        to_add = emit_jmp(p);
+        free_expr_slot(p, l);
+        break;
+    }
+    append_jmp(p, &l->true_list, to_add);
+    int next = p->f->fn->num_ins;
+    patch_jmps(p, l->false_list, next);
+    l->false_list = JMP_NONE;
+}
+
 static void emit_binop_left(Parser *p, int op, Expr *l) {
     switch (op) {
     case '+': case '-': case '*': case '/': case '%': case '^':
@@ -421,6 +582,8 @@ static void emit_binop_left(Parser *p, int op, Expr *l) {
             to_any_slot(p, l);
         }
         break;
+    case TK_AND: emit_and_left(p, l); break;
+    case TK_OR:  emit_or_left(p, l); break;
     default: assert(0); // TODO: remaining binops
     }
 }
@@ -555,6 +718,18 @@ static void emit_rel(Parser *p, int op, Expr *l, Expr r) {
     l->pc = emit_jmp(p);
 }
 
+static void emit_and(Parser *p, Expr *l, Expr r) {
+    assert(l->true_list == JMP_NONE); // Patched by 'emit_and_left'
+    append_jmp(p, &r.false_list, l->false_list);
+    *l = r;
+}
+
+static void emit_or(Parser *p, Expr *l, Expr r) {
+    assert(l->false_list == JMP_NONE); // Patched by 'emit_or_left'
+    append_jmp(p, &r.true_list, l->true_list);
+    *l = r;
+}
+
 static void emit_binop(Parser *p, int op, Expr *l, Expr r) {
     switch (op) {
     case '+': case '-': case '*': case '/': case '%': case '^':
@@ -566,6 +741,8 @@ static void emit_binop(Parser *p, int op, Expr *l, Expr r) {
     case '<': case TK_LE: case '>': case TK_GE:
         emit_rel(p, op, l, r);
         break;
+    case TK_AND: emit_and(p, l, r); break;
+    case TK_OR:  emit_or(p, l, r); break;
     default: assert(0); // TODO: remaining binops
     }
 }
