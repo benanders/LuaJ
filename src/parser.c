@@ -968,6 +968,20 @@ static void parse_repeat(Parser *p) {
     patch_jmps_here(p, loop.breaks);
 }
 
+static void parse_break(Parser *p) {
+    Token tk;
+    expect_tk(p->l, TK_BREAK, &tk);
+    BlockScope *loop = p->f->b;
+    while (loop && !loop->is_loop) {
+        loop = loop->outer;
+    }
+    if (!loop) {
+        ErrInfo info = tk2err(&tk);
+        err_syntax(p->L, &info, "no loop to break");
+    }
+    append_jmp(p, &loop->breaks, emit_jmp(p));
+}
+
 static void parse_stmt(Parser *p) {
     switch (peek_tk(p->l, NULL)) {
         case TK_LOCAL:  parse_local(p); break;
@@ -975,6 +989,7 @@ static void parse_stmt(Parser *p) {
         case TK_IF:     parse_if(p); break;
         case TK_WHILE:  parse_while(p); break;
         case TK_REPEAT: parse_repeat(p); break;
+        case TK_BREAK:  parse_break(p); break;
         default:        assert(0); // TODO
     }
 }
