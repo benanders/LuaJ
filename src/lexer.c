@@ -215,11 +215,12 @@ static void next_tk(Lexer *l) {
 }
 
 int read_tk(Lexer *l, Token *tk) {
-    next_tk(l);
+    int t = l->tk.t;
     if (tk) {
         *tk = l->tk;
     }
-    return l->tk.t;
+    next_tk(l);
+    return t;
 }
 
 int peek_tk(Lexer *l, Token *tk) {

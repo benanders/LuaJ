@@ -918,9 +918,9 @@ static void adjust_assign(Parser *p, int num_defs, int num_exprs, int line) {
 static void parse_local_def(Parser *p) {
     int num_defs = 0;
     Str *names[LUAI_MAXVARS];
-    while (peek_tk(p->l, NULL) == TK_IDENT) {
-        Token name;
-        read_tk(p->l, &name);
+    Token name;
+    while (peek_tk(p->l, &name) == TK_IDENT) {
+        read_tk(p->l, NULL);
         names[num_defs++] = name.s;
         if (peek_tk(p->l, NULL) != ',') {
             break;

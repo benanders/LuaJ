@@ -50,9 +50,9 @@
     /* Conditions */   \
     X(NOT, 2)          \
     X(IST, 1)          \
-    X(ISTC, 1)         \
+    X(ISTC, 2)         \
     X(ISF, 1)          \
-    X(ISFC, 1)         \
+    X(ISFC, 2)         \
     X(EQVV, 2)         \
     X(EQVN, 2)         \
     X(EQVP, 2)         \
