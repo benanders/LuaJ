@@ -513,7 +513,7 @@ static int fold_unop(int op, Expr *l) {
         expr_new(l, EXPR_PRIM, l->line);
         l->tag = t ? TAG_TRUE : TAG_FALSE;
         return 1;
-    default: assert(0); // TODO
+    default: assert(0); // TODO: remaining unops (len)
     }
 }
 
@@ -615,7 +615,7 @@ static void emit_binop_left(Parser *p, Token *op, Expr *l) {
         break;
     case TK_AND: emit_branch_true(p, l, op->line); break;
     case TK_OR:  emit_branch_false(p, l, op->line); break;
-    default: assert(0); // TODO: remaining binops
+    default: assert(0); // TODO: remaining binops (concat)
     }
 }
 
@@ -775,7 +775,7 @@ static void emit_binop(Parser *p, Token *op, Expr *l, Expr r) {
         break;
     case TK_AND: emit_and(p, l, r); break;
     case TK_OR:  emit_or(p, l, r); break;
-    default: assert(0); // TODO: remaining binops
+    default: assert(0); // TODO: remaining binops (concat)
     }
 }
 
@@ -906,22 +906,17 @@ static void emit_knil(Parser *p, uint8_t base, int n, int line) {
     }
 }
 
-static void adjust_assign(Parser *p, int num_defs, int num_exprs, int line) {
-    if (num_defs > num_exprs) {
-        int extra = num_defs - num_exprs;
-        emit_knil(p, p->f->num_locals - extra, extra, line);
-    } else if (num_exprs > num_defs) {
-        p->f->num_stack = p->f->num_locals; // Drop extra expressions
-    }
-}
-
 static void parse_local_def(Parser *p) {
-    int num_defs = 0;
+    int num_vars = 0;
     Str *names[LUAI_MAXVARS];
     Token name;
     while (peek_tk(p->l, &name) == TK_IDENT) {
         read_tk(p->l, NULL);
-        names[num_defs++] = name.s;
+        if (num_vars >= LUAI_MAXVARS) {
+            ErrInfo info = tk2err(&name);
+            err_syntax(p->L, &info, "too many local variables in function");
+        }
+        names[num_vars++] = name.s;
         if (peek_tk(p->l, NULL) != ',') {
             break;
         } else {
@@ -933,12 +928,17 @@ static void parse_local_def(Parser *p) {
     Expr r;
     int num_exprs = parse_expr_list(p, &r);
     to_next_slot(p, &r); // Contiguous expression slots
-    for (int i = 0; i < num_defs; i++) {
-        // Define the locals after parsing the expression list so they can't
-        // be used in the list
+    for (int i = 0; i < num_vars; i++) {
+        // Define the locals after parsing the expression list so that they
+        // can't be used in the expressions
         def_local(p, names[i]);
     }
-    adjust_assign(p, num_defs, num_exprs, assign.line);
+    if (num_vars > num_exprs) {
+        int extra = num_vars - num_exprs;
+        emit_knil(p, p->f->num_locals - extra, extra, assign.line);
+    } else if (num_exprs > num_vars) {
+        p->f->num_stack = p->f->num_locals; // Drop extra expressions
+    }
 }
 
 static void parse_local(Parser *p) {
@@ -947,6 +947,57 @@ static void parse_local(Parser *p) {
         assert(0); // TODO
     } else {
         parse_local_def(p);
+    }
+}
+
+static void parse_assign(Parser *p, Expr l) {
+    int num_vars = 1;
+    Expr vars[LUAI_MAXVARS];
+    vars[0] = l;
+    while (peek_tk(p->l, NULL) == ',') {
+        read_tk(p->l, NULL); // Skip ','
+        if (num_vars >= LUAI_MAXVARS) {
+            Token var;
+            peek_tk(p->l, &var);
+            ErrInfo info = tk2err(&var);
+            err_syntax(p->L, &info, "too many variables in assignment");
+        }
+        parse_primary_expr(p, &l);
+        vars[num_vars++] = l;
+    }
+    Token assign;
+    expect_tk(p->l, '=', &assign);
+    Expr r;
+    int num_exprs = parse_expr_list(p, &r);
+    if (num_vars > num_exprs) { // Fill extra with nil
+        to_next_slot(p, &r); // Contiguous expression slots
+        int extra = num_vars - num_exprs;
+        emit_knil(p, p->f->num_stack, extra, assign.line);
+    } else if (num_exprs > num_vars) { // Get rid of extras
+        int extra = num_exprs - num_vars;
+        p->f->num_stack -= extra;
+    } else { // num_vars == num_exprs
+        // Put the last expression directly into the last variable's slot
+        Expr *last_var = &vars[num_vars - 1];
+        assert(last_var->t == EXPR_SLOT);
+        to_slot(p, &r, last_var->slot);
+        num_vars--; num_exprs--;
+    }
+    for (int i = num_vars - 1; i >= 0; i--) {
+        Expr *var = &vars[i];
+        assert(var->t == EXPR_SLOT);
+        uint8_t expr_slot = p->f->num_stack - num_vars + i;
+        emit(p, ins2(BC_MOV, var->slot, expr_slot), assign.line);
+    }
+}
+
+static void parse_assign_or_call(Parser *p) {
+    Expr l;
+    parse_primary_expr(p, &l);
+    if (peek_tk(p->l, NULL) == ',' || peek_tk(p->l, NULL) == '=') {
+        parse_assign(p, l);
+    } else { // Function call
+        assert(0); // TODO
     }
 }
 
@@ -1051,14 +1102,16 @@ static void parse_return(Parser *p) {
 
 static void parse_stmt(Parser *p) {
     switch (peek_tk(p->l, NULL)) {
-        case TK_LOCAL:  parse_local(p); break;
-        case TK_DO:     parse_do(p); break;
-        case TK_IF:     parse_if(p); break;
-        case TK_WHILE:  parse_while(p); break;
-        case TK_REPEAT: parse_repeat(p); break;
-        case TK_BREAK:  parse_break(p); break;
-        case TK_RETURN: parse_return(p); break;
-        default:        assert(0); // TODO
+        case TK_FUNCTION: assert(0); // TODO
+        case TK_LOCAL:    parse_local(p); break;
+        case TK_DO:       parse_do(p); break;
+        case TK_IF:       parse_if(p); break;
+        case TK_WHILE:    parse_while(p); break;
+        case TK_REPEAT:   parse_repeat(p); break;
+        case TK_FOR:      assert(0); // TODO
+        case TK_BREAK:    parse_break(p); break;
+        case TK_RETURN:   parse_return(p); break;
+        default:          parse_assign_or_call(p); break;
     }
 }
 
