@@ -998,23 +998,24 @@ static void parse_assign(Parser *p, Expr l) {
     expect_tk(p->l, '=', &assign);
     Expr r;
     int num_exprs = parse_expr_list(p, &r);
-    if (num_vars > num_exprs) {
+    if (num_vars != num_exprs) {
         to_next_slot(p, &r); // Contiguous expression slots
-        int extra = num_vars - num_exprs;
-        emit_knil(p, p->f->num_stack, extra, assign.line); // Fill extras
-    } else if (num_exprs > num_vars) {
-        to_next_slot(p, &r); // Contiguous expression slots
-        int extra = num_exprs - num_vars;
-        p->f->num_stack -= extra; // Get rid of extras
-    } else { // num_vars == num_exprs
-        // Put the last expression directly into the last variable's slot
+        if (num_vars > num_exprs) { // Fill extra variables with nil
+            int extra_vars = num_vars - num_exprs;
+            emit_knil(p, p->f->num_stack, extra_vars, assign.line);
+        } else { // Get rid of extra expressions
+            int extra_exprs = num_exprs - num_vars;
+            p->f->num_stack -= extra_exprs;
+        }
+    } else {
+        // Put the last expression directly into the last variable
         Expr *last_var = &vars[num_vars - 1];
         to_slot(p, &r, last_var->slot);
         num_vars--; num_exprs--;
     }
     for (int i = num_vars - 1; i >= 0; i--) {
         Expr *var = &vars[i];
-        uint8_t expr_slot = p->f->num_stack - num_vars + i;
+        uint8_t expr_slot = --p->f->num_stack; // Pop expression off the stack
         emit(p, ins2(BC_MOV, var->slot, expr_slot), assign.line);
     }
 }
