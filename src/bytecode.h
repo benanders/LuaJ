@@ -46,7 +46,8 @@
     X(MODNV, 3)        \
     X(POW, 3)          \
                        \
-    /* Comparisons */  \
+    /* Conditions */   \
+    X(NOT, 2)          \
     X(IST, 1)          \
     X(ISTC, 1)         \
     X(ISF, 1)          \

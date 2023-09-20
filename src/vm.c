@@ -131,7 +131,11 @@ OP_POW:
     NEXT();
 
 
-    // ---- Comparisons ----
+    // ---- Conditions ----
+
+OP_NOT:
+    s[bc_a(*ip)] = compares_true(s[bc_d(*ip)]) ? VAL_TRUE : VAL_FALSE;
+    NEXT();
 
     // Comparison instructions are always followed by a 'BC_JMP' instruction.
     // We skip the jump instruction (by incrementing 'ip') if the condition is

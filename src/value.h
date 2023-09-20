@@ -51,9 +51,8 @@ static inline int is_prim(uint64_t v)  { return (v & OBJ_MASK) == TAG_PRIM; }
 static inline int is_nil(uint64_t v)   { return v == VAL_NIL; }
 static inline int is_false(uint64_t v) { return v == VAL_FALSE; }
 static inline int is_true(uint64_t v)  { return v == VAL_TRUE; }
-
 static inline int compares_true(uint64_t v) {
-    return (v & FALSE_MASK) != FALSE_MASK;
+    return (v & FALSE_MASK) != FALSE_MASK; // Only false and nil compare false
 }
 
 static inline uint64_t n2v(double n) {
