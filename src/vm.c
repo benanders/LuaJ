@@ -10,19 +10,34 @@
 #define DISPATCH() goto *dispatch[bc_op(*ip)]
 #define NEXT()     goto *dispatch[bc_op(*(++ip))]
 
-static inline void check_num(State *L, uint64_t v) {
-    if (!is_num(v)) {
-        err_run(L, NULL, "expected number in binary operation, got %s",
-                type_name(v));
+#define ERR(msg, ...)                            \
+    int line = fn->line_info[ip - fn->ins];      \
+    ErrInfo info = { fn->chunk_name, line, -1 }; \
+    err_run(L, &info, msg, __VA_ARGS__);
+
+#define ERR_UNOP(msg, l)      \
+    char *t = type_name((l)); \
+    ERR("attempt to " msg " a %s value", t)
+#define ERR_BINOP(msg, l, r)                                 \
+    char *lt = type_name((l));                               \
+    char *rt = type_name((r));                               \
+    if (lt == rt) {                                          \
+        ERR("attempt to " msg " two %s values", lt)          \
+    } else {                                                 \
+        ERR("attempt to " msg " a %s and %s value", lt, rt)  \
     }
-}
+
+#define CHECK_V(msg, l)     if (!is_num((l))) { ERR_UNOP(msg, l); }
+#define CHECK_VV(msg, l, r) if (!is_num((l)) || !is_num((r))) { ERR_BINOP(msg, l, r) }
+#define CHECK_VN(msg, l, r) if (!is_num((l))) { ERR_BINOP(msg, l, r); }
+#define CHECK_NV(msg, l, r) if (!is_num((r))) { ERR_BINOP(msg, l, r); }
 
 // The interpreter is written using computed gotos, which places individual
 // branch instructions at the end of each opcode (rather than using a loop with
 // a single big branch instruction). The CPU can then perform branch prediction
-// individually at the end of each opcode. This results in faster performance
-// because certain opcode pairs are more common than others (e.g., conditional
-// instructions followed by JMP).
+// at the end of each opcode. This results in faster performance because certain
+// opcode pairs are more common than others (e.g., conditional instructions
+// followed by JMP).
 void execute(State *L) {
     static void *DISPATCH[] = {
 #define X(name, nargs) &&OP_ ## name,
@@ -64,69 +79,69 @@ OP_KPRIM:
     // ---- Arithmetic ----
 
 OP_NEG:
-    check_num(L, s[bc_d(*ip)]);
+    CHECK_V("negate", s[bc_d(*ip)])
     s[bc_a(*ip)] = n2v(-v2n(s[bc_d(*ip)]));
     NEXT();
 
 OP_ADDVV:
-    check_num(L, s[bc_b(*ip)]); check_num(L, s[bc_c(*ip)]);
+    CHECK_VV("add", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) + v2n(s[bc_c(*ip)]));
     NEXT();
 OP_ADDVN:
-    check_num(L, s[bc_b(*ip)]);
+    CHECK_VN("add", s[bc_b(*ip)], k[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) + v2n(k[bc_c(*ip)]));
     NEXT();
 
 OP_SUBVV:
-    check_num(L, s[bc_b(*ip)]); check_num(L, s[bc_c(*ip)]);
+    CHECK_VV("subtract", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) - v2n(s[bc_c(*ip)]));
     NEXT();
 OP_SUBVN:
-    check_num(L, s[bc_b(*ip)]);
+    CHECK_VN("subtract", s[bc_b(*ip)], k[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) - v2n(k[bc_c(*ip)]));
     NEXT();
 OP_SUBNV:
-    check_num(L, s[bc_c(*ip)]);
+    CHECK_NV("subtract", k[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(k[bc_b(*ip)]) - v2n(s[bc_c(*ip)]));
     NEXT();
 
 OP_MULVV:
-    check_num(L, s[bc_b(*ip)]); check_num(L, s[bc_c(*ip)]);
+    CHECK_VV("multiply", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) * v2n(s[bc_c(*ip)]));
     NEXT();
 OP_MULVN:
-    check_num(L, s[bc_b(*ip)]);
+    CHECK_VN("multiply", s[bc_b(*ip)], k[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) * v2n(k[bc_c(*ip)]));
     NEXT();
 
 OP_DIVVV:
-    check_num(L, s[bc_b(*ip)]); check_num(L, s[bc_c(*ip)]);
+    CHECK_VV("divide", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) / v2n(s[bc_c(*ip)]));
     NEXT();
 OP_DIVVN:
-    check_num(L, s[bc_b(*ip)]);
+    CHECK_VN("divide", s[bc_b(*ip)], k[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(s[bc_b(*ip)]) / v2n(k[bc_c(*ip)]));
     NEXT();
 OP_DIVNV:
-    check_num(L, s[bc_c(*ip)]);
+    CHECK_NV("divide", k[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(v2n(k[bc_b(*ip)]) / v2n(s[bc_c(*ip)]));
     NEXT();
 
 OP_MODVV:
-    check_num(L, s[bc_b(*ip)]); check_num(L, s[bc_c(*ip)]);
+    CHECK_VV("modulo", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(fmod(v2n(s[bc_b(*ip)]), v2n(s[bc_c(*ip)])));
     NEXT();
 OP_MODVN:
-    check_num(L, s[bc_b(*ip)]);
+    CHECK_VN("modulo", s[bc_b(*ip)], k[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(fmod(v2n(s[bc_b(*ip)]), v2n(k[bc_c(*ip)])));
     NEXT();
 OP_MODNV:
-    check_num(L, s[bc_c(*ip)]);
+    CHECK_NV("modulo", k[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(fmod(v2n(k[bc_b(*ip)]), v2n(s[bc_c(*ip)])));
     NEXT();
 
 OP_POW:
-    check_num(L, s[bc_b(*ip)]); check_num(L, s[bc_c(*ip)]);
+    CHECK_VV("perform exponentiation on", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(pow(v2n(s[bc_b(*ip)]), v2n(s[bc_c(*ip)])));
     NEXT();
 
@@ -184,38 +199,38 @@ OP_NEQVP:
     NEXT();
 
 OP_LTVV:
-    check_num(L, s[bc_a(*ip)]); check_num(L, s[bc_d(*ip)]);
+    CHECK_VV("compare less than", s[bc_a(*ip)], s[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) >= v2n(s[bc_d(*ip)])) { ip++; }
     NEXT();
 OP_LTVN:
-    check_num(L, s[bc_a(*ip)]);
+    CHECK_VN("compare less than", s[bc_a(*ip)], k[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) >= v2n(k[bc_d(*ip)])) { ip++; }
     NEXT();
 
 OP_LEVV:
-    check_num(L, s[bc_a(*ip)]); check_num(L, s[bc_d(*ip)]);
+    CHECK_VV("compare less than or equal", s[bc_a(*ip)], s[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) > v2n(s[bc_d(*ip)])) { ip++; }
     NEXT();
 OP_LEVN:
-    check_num(L, s[bc_a(*ip)]);
+    CHECK_VN("compare less than or equal", s[bc_a(*ip)], k[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) > v2n(k[bc_d(*ip)])) { ip++; }
     NEXT();
 
 OP_GTVV:
-    check_num(L, s[bc_a(*ip)]); check_num(L, s[bc_d(*ip)]);
+    CHECK_VV("compare greater than", s[bc_a(*ip)], s[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) <= v2n(s[bc_d(*ip)])) { ip++; }
     NEXT();
 OP_GTVN:
-    check_num(L, s[bc_a(*ip)]);
+    CHECK_VN("compare greater than", s[bc_a(*ip)], k[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) <= v2n(k[bc_d(*ip)])) { ip++; }
     NEXT();
 
 OP_GEVV:
-    check_num(L, s[bc_a(*ip)]); check_num(L, s[bc_d(*ip)]);
+    CHECK_VV("compare greater than or equal", s[bc_a(*ip)], s[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) < v2n(s[bc_d(*ip)])) { ip++; }
     NEXT();
 OP_GEVN:
-    check_num(L, s[bc_a(*ip)]);
+    CHECK_VN("compare greater than or equal", s[bc_a(*ip)], k[bc_d(*ip)])
     if (v2n(s[bc_a(*ip)]) < v2n(k[bc_d(*ip)])) { ip++; }
     NEXT();
 

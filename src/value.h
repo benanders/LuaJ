@@ -122,21 +122,23 @@ static inline char * str_val(Str *s)  { return (char *) (s + 1); }
 // Function prototype.
 typedef struct {
     ObjHeader;
+    char *chunk_name;
     int num_params;
     BcIns *ins;
+    int *line_info;
     int num_ins, max_ins;
     uint64_t *k;
     int num_k, max_k;
 } Fn;
 
-Fn * fn_new(State *L);
+Fn * fn_new(State *L, char *chunk_name);
 void fn_free(State *L, Fn *f);
-int fn_emit(State *L, Fn *f, BcIns ins);
+int fn_emit(State *L, Fn *f, BcIns ins, int line);
 int fn_emit_k(State *L, Fn *f, uint64_t k);
 
-static inline uint64_t fn2v(Fn *f)   { return ptr2v(f); }
-static inline Fn * v2fn(uint64_t v)  { return (Fn *) v2ptr(v); }
-static inline int is_fn(uint64_t v)  { return is_obj(v, OBJ_FN);  }
+static inline uint64_t fn2v(Fn *f)  { return ptr2v(f); }
+static inline Fn * v2fn(uint64_t v) { return (Fn *) v2ptr(v); }
+static inline int is_fn(uint64_t v) { return is_obj(v, OBJ_FN);  }
 
 char * type_name(uint64_t v);
 
