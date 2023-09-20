@@ -74,6 +74,11 @@ OP_KNUM:
 OP_KPRIM:
     s[bc_a(*ip)] = prim2v(bc_d(*ip));
     NEXT();
+OP_KNIL:
+    for (int n = bc_a(*ip); n <= bc_d(*ip); n++) {
+        s[n] = VAL_NIL;
+    }
+    NEXT();
 
 
     // ---- Arithmetic ----

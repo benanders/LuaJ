@@ -21,16 +21,17 @@
 #define JMP_BIAS 0x800000
 
 #define BYTECODE       \
-    X(NOP, 3)          \
+    X(NOP, 0)          \
                        \
     /* Storage */      \
-    X(MOV, 3)          \
-    X(KINT, 3)         \
-    X(KNUM, 3)         \
-    X(KPRIM, 3)        \
+    X(MOV, 2)          \
+    X(KINT, 2)         \
+    X(KNUM, 2)         \
+    X(KPRIM, 2)        \
+    X(KNIL, 2)         \
                        \
     /* Arithmetic */   \
-    X(NEG, 3)          \
+    X(NEG, 1)          \
     X(ADDVV, 3)        \
     X(ADDVN, 3)        \
     X(SUBVV, 3)        \

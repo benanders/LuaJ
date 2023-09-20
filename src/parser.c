@@ -897,14 +897,48 @@ static int parse_cond_expr(Parser *p) {
 
 static void parse_block(Parser *p); // Forward declaration
 
+static void emit_knil(Parser *p, uint8_t base, int n, int line) {
+    // TODO: combine with previous knil/kprim instructions
+    if (n == 1) {
+        emit(p, ins2(BC_KPRIM, base, TAG_NIL), line);
+    } else {
+        emit(p, ins2(BC_KNIL, base, base + n - 1), line);
+    }
+}
+
+static void adjust_assign(Parser *p, int num_defs, int num_exprs, int line) {
+    if (num_defs > num_exprs) {
+        int extra = num_defs - num_exprs;
+        emit_knil(p, p->f->num_locals - extra, extra, line);
+    } else if (num_exprs > num_defs) {
+        p->f->num_stack = p->f->num_locals; // Drop extra expressions
+    }
+}
+
 static void parse_local_def(Parser *p) {
-    Token name;
-    expect_tk(p->l, TK_IDENT, &name);
-    expect_tk(p->l, '=', NULL);
+    int num_defs = 0;
+    Str *names[LUAI_MAXVARS];
+    while (peek_tk(p->l, NULL) == TK_IDENT) {
+        Token name;
+        read_tk(p->l, &name);
+        names[num_defs++] = name.s;
+        if (peek_tk(p->l, NULL) != ',') {
+            break;
+        } else {
+            read_tk(p->l, NULL);
+        }
+    }
+    Token assign;
+    expect_tk(p->l, '=', &assign);
     Expr r;
-    parse_expr(p, &r);
-    to_next_slot(p, &r);
-    def_local(p, name.s);
+    int num_exprs = parse_expr_list(p, &r);
+    to_next_slot(p, &r); // Contiguous expression slots
+    for (int i = 0; i < num_defs; i++) {
+        // Define the locals after parsing the expression list so they can't
+        // be used in the list
+        def_local(p, names[i]);
+    }
+    adjust_assign(p, num_defs, num_exprs, assign.line);
 }
 
 static void parse_local(Parser *p) {
