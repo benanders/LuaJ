@@ -7,34 +7,6 @@
 #include "lexer.h"
 #include "value.h"
 
-// For instructions associated with an EXPR_RELOC that haven't had a destination
-// slot assigned yet.
-#define NO_SLOT 0xff
-
-// Used for 'BC_JMP' instructions that have been emitted but haven't had their
-// jump target set yet.
-#define JMP_NONE (-1)
-
-enum {
-    EXPR_PRIM,
-    EXPR_NUM,
-    EXPR_SLOT,
-    EXPR_RELOC,
-    EXPR_JMP,
-};
-
-typedef struct {
-    int t;
-    int line;
-    union {
-        uint16_t tag; // EXPR_PRIM
-        double num;   // EXPR_NUM
-        uint8_t slot; // EXPR_SLOT
-        int pc;       // EXPR_RELOC, EXPR_JMP
-    };
-    int true_list, false_list;
-} Expr;
-
 typedef struct BlockScope {
     struct BlockScope *outer;
     int first_local;
@@ -59,13 +31,6 @@ static Parser parser_new(State *L, Lexer *l) {
     p.L = L;
     p.l = l;
     return p;
-}
-
-static void expr_new(Expr *e, int t, int line) {
-    *e = (Expr) {0};
-    e->t = t;
-    e->line = line;
-    e->true_list = e->false_list = JMP_NONE;
 }
 
 static int emit(Parser *p, BcIns ins, int line) {
@@ -124,19 +89,6 @@ static void def_local(Parser *p, Str *name) {
     p->f->locals[p->f->num_locals++] = name;
 }
 
-static void find_var(Parser *p, Expr *e, Token *name) {
-    for (int i = p->f->num_locals - 1; i >= 0; i--) { // In reverse
-        Str *l = p->f->locals[i];
-        if (name->s->len == l->len &&
-                strncmp(str_val(name->s), str_val(l), l->len) == 0) {
-            expr_new(e, EXPR_SLOT, name->line);
-            e->slot = i;
-            return;
-        }
-    }
-    assert(0); // TODO: upvalues and globals
-}
-
 
 // ---- Expressions ----
 
@@ -149,6 +101,34 @@ static void find_var(Parser *p, Expr *e, Token *name) {
 // destination slot assigned yet. For example, a 'BC_ADD' instruction without
 // its 'a' parameter set. The destination slot for the expression is set when
 // it's used.
+
+// For instructions associated with an EXPR_RELOC that haven't had a destination
+// slot assigned yet.
+#define NO_SLOT 0xff
+
+// Used for 'BC_JMP' instructions that have been emitted but haven't had their
+// jump target set yet.
+#define JMP_NONE (-1)
+
+enum {
+    EXPR_PRIM,
+    EXPR_NUM,
+    EXPR_SLOT,
+    EXPR_RELOC,
+    EXPR_JMP,
+};
+
+typedef struct {
+    int t;
+    int line;
+    union {
+        uint16_t tag; // EXPR_PRIM
+        double num;   // EXPR_NUM
+        uint8_t slot; // EXPR_SLOT
+        int pc;       // EXPR_RELOC, EXPR_JMP
+    };
+    int true_list, false_list;
+} Expr;
 
 enum {
     PREC_MIN,
@@ -239,15 +219,18 @@ static int INVERT_OP[BC_LAST] = {
     [BC_GEVV] = BC_LTVV,  [BC_GEVN] = BC_LTVN,
 };
 
-static inline int is_int(double n, int *i) {
-    lua_number2int(*i, n);
-    return n == *i;
+static void expr_new(Expr *e, int t, int line) {
+    *e = (Expr) {0};
+    e->t = t;
+    e->line = line;
+    e->true_list = e->false_list = JMP_NONE;
 }
 
 // Is there a jump list associated with the expression value?
 static int has_jmp(Expr *e) {
     return e->true_list != JMP_NONE || e->false_list != JMP_NONE;
 }
+
 static int is_num_expr(Expr *e)  { return e->t == EXPR_NUM && !has_jmp(e); }
 static int is_prim_expr(Expr *e) { return e->t == EXPR_PRIM && !has_jmp(e); }
 static int is_k_expr(Expr *e)    { return is_num_expr(e) || is_prim_expr(e); }
@@ -280,9 +263,7 @@ static int follow_jmp(Parser *p, int jmp) {
     return jmp + delta - JMP_BIAS;
 }
 
-// Add a jump list (or single jump instruction) to a jump list. 'head'
-// specifies a jump list. This function puts 'to_add' at the start of the
-// 'head' jump list.
+// Puts the jump list 'to_add' at the start of another jump list 'head'.
 static void append_jmp(Parser *p, int *head, int to_add) {
     if (to_add == JMP_NONE) { // Nothing to add
         return;
@@ -315,16 +296,9 @@ static int discard_val(Parser *p, int jmp) {
     }
 }
 
-static void discard_vals(Parser *p, int head) {
-    while (head != JMP_NONE) {
-        discard_val(p, head);
-        head = follow_jmp(p, head);
-    }
-}
-
 // Patches the destination slot for a value associated with a jump (e.g., in
-// 'x and 3'). Returns 1 if there was a value to patch.
-static int patch_value(Parser *p, int jmp, uint8_t dst) {
+// 'x and 3'). Returns 1 if there was a value to patch/discard.
+static int patch_val(Parser *p, int jmp, uint8_t dst) {
     BcIns *cond = &p->f->fn->ins[jmp > 0 ? jmp - 1 : 0];
     uint8_t op = bc_op(*cond);
     if (dst == NO_SLOT) {
@@ -334,6 +308,14 @@ static int patch_value(Parser *p, int jmp, uint8_t dst) {
         return 1;
     } else {
         return 0;
+    }
+}
+
+// Discards all values associated with jumps along a jump list 'head'.
+static void discard_vals(Parser *p, int head) {
+    while (head != JMP_NONE) {
+        discard_val(p, head);
+        head = follow_jmp(p, head);
     }
 }
 
@@ -354,7 +336,7 @@ static void patch_jmps_and_vals(
         int val_target) {
     while (head != JMP_NONE) {
         int next = follow_jmp(p, head);
-        if (patch_value(p, head, dst)) {
+        if (patch_val(p, head, dst)) {
             patch_jmp(p, head, val_target);
         } else {
             patch_jmp(p, head, jmp_target);
@@ -368,8 +350,14 @@ static void patch_jmps(Parser *p, int head, int target) {
     patch_jmps_and_vals(p, head, target, NO_SLOT, target);
 }
 
+static void patch_jmps_here(Parser *p, int head) {
+    // TODO: combine jump chains (jumps to another jump) for efficiency
+    int target = p->f->fn->num_ins;
+    patch_jmps(p, head, target);
+}
+
 // Checks to see if all jumps in the jump list have a value associated with
-// them, or if any are just pure conditions.
+// them, or if any are pure conditionals.
 //
 // E.g., the true and false jump lists for 'a and b + 3 or c' all have values
 // associated with them. 'a and b == 3 or c' doesn't.
@@ -383,6 +371,11 @@ static int jmps_need_fall_through(Parser *p, int head) {
         head = follow_jmp(p, head);
     }
     return 0;
+}
+
+static inline int is_int(double n, int *i) {
+    lua_number2int(*i, n);
+    return n == *i;
 }
 
 // Stores the result of an expression into a specific stack slot.
@@ -421,9 +414,8 @@ static void to_slot(Parser *p, Expr *e, uint8_t dst) {
             false_case = emit(p, ins2(BC_KPRIM, dst, TAG_FALSE), e->line);
             int middle = emit_jmp(p);
             true_case = emit(p, ins2(BC_KPRIM, dst, TAG_TRUE), e->line);
-            int after = p->f->fn->num_ins;
-            patch_jmp(p, before, after);
-            patch_jmp(p, middle, after);
+            patch_jmps_here(p, before);
+            patch_jmps_here(p, middle);
         }
         int after = p->f->fn->num_ins;
         patch_jmps_and_vals(p, e->true_list, true_case, dst, after);
@@ -538,10 +530,10 @@ static void emit_unop(Parser *p, Token *op, Expr *l) {
     l->pc = emit(p, ins2(UNOP_BC[op->t], NO_SLOT, d), op->line);
 }
 
-// Emits a branch on the "truthiness" of 'l' and adds this jump to 'l's false
+// Emits a branch on the "falseness" of 'l' and adds this jump to 'l's false
 // jump list. Patches the expression's true jump list to the instruction after
 // the emitted branch.
-static void emit_and_left(Parser *p, Token *op, Expr *l) {
+static void emit_branch_true(Parser *p, Expr *l, int line) {
     int to_add;
     switch (l->t) {
     case EXPR_PRIM:
@@ -559,7 +551,7 @@ static void emit_and_left(Parser *p, Token *op, Expr *l) {
         to_add = l->pc;
         break;
     default:
-        emit(p, ins2(BC_ISFC, NO_SLOT, to_any_slot(p, l)), op->line);
+        emit(p, ins2(BC_ISFC, NO_SLOT, to_any_slot(p, l)), line);
         to_add = emit_jmp(p);
         free_expr_slot(p, l);
         break;
@@ -570,9 +562,10 @@ static void emit_and_left(Parser *p, Token *op, Expr *l) {
     l->true_list = JMP_NONE;
 }
 
-// Emits a branch on the "truthiness" of 'l' and patches the expression's false
-// jump list to the instruction after.
-static void emit_or_left(Parser *p, Token *op, Expr *l) {
+// Emits a branch on the "truthiness" of 'l' and adds this jump to 'l's true
+// jump list. Patches the expression's false jump list to the instruction after
+// the emitted branch.
+static void emit_branch_false(Parser *p, Expr *l, int line) {
     int to_add;
     switch (l->t) {
     case EXPR_PRIM:
@@ -588,7 +581,7 @@ static void emit_or_left(Parser *p, Token *op, Expr *l) {
         to_add = l->pc;
         break;
     default:
-        emit(p, ins2(BC_ISTC, NO_SLOT, to_any_slot(p, l)), op->line);
+        emit(p, ins2(BC_ISTC, NO_SLOT, to_any_slot(p, l)), line);
         to_add = emit_jmp(p);
         free_expr_slot(p, l);
         break;
@@ -612,8 +605,8 @@ static void emit_binop_left(Parser *p, Token *op, Expr *l) {
             to_any_slot(p, l);
         }
         break;
-    case TK_AND: emit_and_left(p, op, l); break;
-    case TK_OR:  emit_or_left(p, op, l); break;
+    case TK_AND: emit_branch_true(p, l, op->line); break;
+    case TK_OR:  emit_branch_false(p, l, op->line); break;
     default: assert(0); // TODO: remaining binops
     }
 }
@@ -778,6 +771,19 @@ static void emit_binop(Parser *p, Token *op, Expr *l, Expr r) {
     }
 }
 
+static void find_var(Parser *p, Expr *e, Token *name) {
+    for (int i = p->f->num_locals - 1; i >= 0; i--) { // In reverse
+        Str *l = p->f->locals[i];
+        if (name->s->len == l->len &&
+                strncmp(str_val(name->s), str_val(l), l->len) == 0) {
+            expr_new(e, EXPR_SLOT, name->line);
+            e->slot = i;
+            return;
+        }
+    }
+    assert(0); // TODO: upvalues and globals
+}
+
 // Forward declaration
 static void parse_subexpr(Parser *p, Expr *l, int min_prec);
 
@@ -853,8 +859,23 @@ static void parse_expr(Parser *p, Expr *e) {
     parse_subexpr(p, e, PREC_MIN);
 }
 
+// Patches the condition's true jump list to the instruction immediately after
+// the condition. Returns the condition's false jump list that needs to be
+// patched.
+static int parse_cond_expr(Parser *p) {
+    Expr cond;
+    parse_expr(p, &cond);
+    if (cond.t == EXPR_PRIM && cond.tag == TAG_NIL) {
+        cond.tag = TAG_FALSE;
+    }
+    emit_branch_true(p, &cond, cond.line);
+    return cond.false_list;
+}
+
 
 // ---- Statements ----
+
+static void parse_block(Parser *p); // Forward declaration
 
 static void parse_local_def(Parser *p) {
     Token name;
@@ -875,9 +896,47 @@ static void parse_local(Parser *p) {
     }
 }
 
+static void parse_do(Parser *p) {
+    expect_tk(p->l, TK_DO, NULL);
+    parse_block(p);
+    expect_tk(p->l, TK_END, NULL);
+}
+
+
+static int parse_then(Parser *p) {
+    int false_list = parse_cond_expr(p);
+    expect_tk(p->l, TK_THEN, NULL);
+    parse_block(p);
+    return false_list; // False jump list that still needs patching
+}
+
+static void parse_if(Parser *p) {
+    expect_tk(p->l, TK_IF, NULL);
+    int end_jmps = JMP_NONE;
+    int false_jmps = parse_then(p);
+    while (peek_tk(p->l, NULL) == TK_ELSEIF) {
+        read_tk(p->l, NULL);
+        append_jmp(p, &end_jmps, emit_jmp(p));
+        patch_jmps_here(p, false_jmps);
+        false_jmps = parse_then(p);
+    }
+    if (peek_tk(p->l, NULL) == TK_ELSE) {
+        read_tk(p->l, NULL);
+        append_jmp(p, &end_jmps, emit_jmp(p));
+        patch_jmps_here(p, false_jmps);
+        parse_block(p);
+    } else {
+        append_jmp(p, &end_jmps, false_jmps);
+    }
+    expect_tk(p->l, TK_END, NULL);
+    patch_jmps_here(p, end_jmps);
+}
+
 static void parse_stmt(Parser *p) {
     switch (peek_tk(p->l, NULL)) {
         case TK_LOCAL: parse_local(p); break;
+        case TK_DO:    parse_do(p); break;
+        case TK_IF:    parse_if(p); break;
         default:       assert(0); // TODO
     }
 }
