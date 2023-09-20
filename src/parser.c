@@ -867,6 +867,18 @@ static void parse_expr(Parser *p, Expr *e) {
     parse_subexpr(p, e, PREC_MIN);
 }
 
+static int parse_expr_list(Parser *p, Expr *e) {
+    int n = 1;
+    parse_expr(p, e);
+    while (peek_tk(p->l, NULL) == ',') {
+        read_tk(p->l, NULL);
+        to_next_slot(p, e);
+        parse_expr(p, e);
+        n++;
+    }
+    return n;
+}
+
 // Patches the condition's true jump list to the instruction immediately after
 // the condition. Returns the condition's false jump list that needs to be
 // patched.
@@ -982,6 +994,27 @@ static void parse_break(Parser *p) {
     append_jmp(p, &loop->breaks, emit_jmp(p));
 }
 
+static int is_end_of_block(int tk); // Forward declaration
+
+static void parse_return(Parser *p) {
+    Token ret;
+    expect_tk(p->l, TK_RETURN, &ret);
+    int next = peek_tk(p->l, NULL);
+    if (is_end_of_block(next) || next == ';') { // No return values
+        emit(p, ins0(BC_RET0), ret.line);
+    } else { // One or more return values
+        Expr e;
+        int num_ret = parse_expr_list(p, &e);
+        if (num_ret == 1) {
+            uint8_t slot = to_any_slot(p, &e);
+            emit(p, ins1(BC_RET1, slot), ret.line);
+        } else {
+            to_next_slot(p, &e); // Force contiguous slots
+            emit(p, ins2(BC_RET, p->f->num_locals, num_ret), ret.line);
+        }
+    }
+}
+
 static void parse_stmt(Parser *p) {
     switch (peek_tk(p->l, NULL)) {
         case TK_LOCAL:  parse_local(p); break;
@@ -990,6 +1023,7 @@ static void parse_stmt(Parser *p) {
         case TK_WHILE:  parse_while(p); break;
         case TK_REPEAT: parse_repeat(p); break;
         case TK_BREAK:  parse_break(p); break;
+        case TK_RETURN: parse_return(p); break;
         default:        assert(0); // TODO
     }
 }

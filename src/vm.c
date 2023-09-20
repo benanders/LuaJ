@@ -242,5 +242,7 @@ OP_JMP:
     DISPATCH();
 
 OP_RET0:
+OP_RET1:
+OP_RET:
     printf("first stack: %g\n", v2n(s[1]));
 }

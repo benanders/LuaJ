@@ -69,7 +69,9 @@
                        \
     /* Control flow */ \
     X(JMP, 1)          \
-    X(RET0, 3)
+    X(RET0, 0)         \
+    X(RET1, 1)         \
+    X(RET, 2)
 
 enum {
 #define X(name, _) BC_ ## name,
