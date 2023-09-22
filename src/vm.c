@@ -247,6 +247,7 @@ OP_JMP:
     ip += (int) bc_e(*ip) - JMP_BIAS;
     DISPATCH();
 
+OP_CALL:
 OP_RET0:
 OP_RET1:
 OP_RET:
