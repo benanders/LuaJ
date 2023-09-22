@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <assert.h>
 
 #include "lexer.h"
 
@@ -178,6 +179,101 @@ static void lex_number(Lexer *l) {
     buf_free(l->L, &s);
 }
 
+static char lex_num_esc_seq(Lexer *l) {
+    StrBuf s = buf_new(l->L);
+    char c = read_ch(l->r);
+    while (c >= '0' && c <= '9' && s.len < 3) { // Max of 3 digits
+        buf_push(l->L, &s, c);
+        c = read_ch(l->r);
+    }
+    undo_ch(l->r, c);
+    assert(s.len > 0);
+    buf_push(l->L, &s, '\0'); // strtol needs NULL terminator
+    char esc = (char) strtol(s.s, NULL, 10);
+    buf_free(l->L, &s);
+    return esc;
+}
+
+static char lex_esc_seq(Lexer *l) {
+    ErrInfo info;
+    char c = read_ch(l->r);
+    switch (c) {
+    case 'a': return '\a';
+    case 'b': return '\b';
+    case 'f': return '\f';
+    case 'n': return '\n';
+    case 'r': return '\r';
+    case 't': return '\t';
+    case 'v': return '\v';
+    case '\'': case '"': case '\\': case '\n': return c;
+    case '0' ... '9':
+        undo_ch(l->r, c);
+        return lex_num_esc_seq(l);
+    default:
+        info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "unknown escape sequence in string");
+    }
+}
+
+static void lex_str(Lexer *l) {
+    char quote = read_ch(l->r); // Skip "
+    StrBuf s = buf_new(l->L);
+    char c = read_ch(l->r);
+    while (c != EOF && c != quote) {
+        if (c == '\\') {
+            c = lex_esc_seq(l);
+        }
+        buf_push(l->L, &s, c);
+        c = read_ch(l->r);
+    }
+    if (c == EOF) {
+        buf_free(l->L, &s);
+        ErrInfo info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "unterminated string literal");
+    }
+    l->tk.t = TK_STR;
+    l->tk.s = str_new(l->L, s.s, s.len);
+    buf_free(l->L, &s);
+}
+
+static void lex_long_str(Lexer *l) {
+    int level = lex_open_long_bracket(l);
+    if (level < 0) {
+        ErrInfo info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "invalid long string delimiter");
+    }
+    if (peek_ch(l->r) == '\n') {
+        read_ch(l->r); // Newline immediately following [[ is ignored
+    }
+    int saved_len = 0;
+    int n = -1;
+    StrBuf s = buf_new(l->L);
+    char c = read_ch(l->r);
+    while (c != EOF) {
+        if (n < 0 && c == ']') { // Terminator not yet started
+            saved_len = s.len;
+            n = 0;
+        } else if (n >= 0 && c == '=') { // Another level for terminator
+            n++;
+        } else if (n == level && c == ']') { // Terminator finished
+            break;
+        } else if (n >= 0) { // Not a valid terminator
+            n = -1;
+        }
+        buf_push(l->L, &s, c); // Escape sequences aren't parsed in block strings
+        c = read_ch(l->r);
+    }
+    if (c == EOF) {
+        buf_free(l->L, &s);
+        ErrInfo info = tk2err(&l->tk);
+        err_syntax(l->L, &info, "unterminated string literal");
+    }
+    s.len = saved_len; // Get rid of closing long bracket from string contents
+    l->tk.t = TK_STR;
+    l->tk.s = str_new(l->L, s.s, s.len);
+    buf_free(l->L, &s);
+}
+
 static void lex_symbol(Lexer *l) {
     int c = (int) read_ch(l->r);
     switch (c) {
@@ -209,6 +305,10 @@ static void next_tk(Lexer *l) {
         lex_keyword_or_ident(l);
     } else if (isdigit(c) || (c == '.' && isdigit(peek_ch2(l->r)))) {
         lex_number(l);
+    } else if (c == '\'' || c == '"') {
+        lex_str(l);
+    } else if (c == '[' && (peek_ch2(l->r) == '[' || peek_ch2(l->r) == '=')) {
+        lex_long_str(l);
     } else {
         lex_symbol(l);
     }

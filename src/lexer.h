@@ -61,7 +61,7 @@ typedef struct {
     int line, col;    // For error messages
     union {
         double num; // TK_NUM
-        Str *s;     // TK_IDENT
+        Str *s;     // TK_IDENT, TK_STR
     };
 } Token;
 

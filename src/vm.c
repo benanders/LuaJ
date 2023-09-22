@@ -18,6 +18,7 @@
 #define ERR_UNOP(msg, l)      \
     char *t = type_name((l)); \
     ERR("attempt to " msg " a %s value", t)
+
 #define ERR_BINOP(msg, l, r)                                 \
     char *lt = type_name((l));                               \
     char *rt = type_name((r));                               \
