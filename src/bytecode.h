@@ -48,6 +48,7 @@
     X(MODVN, 3)        \
     X(MODNV, 3)        \
     X(POW, 3)          \
+    X(CONCAT, 3)       \
                        \
     /* Conditions */   \
     X(NOT, 2)          \

@@ -152,7 +152,9 @@ static void lex_keyword_or_ident(Lexer *l) {
         }
     }
     l->tk.t = TK_IDENT;
-    l->tk.s = str_new(l->L, s.s, s.len);
+    l->tk.s = str_new(l->L, s.len);
+    strncpy(str_val(l->tk.s), s.s, s.len);
+    buf_free(l->L, &s);
 }
 
 static void lex_number(Lexer *l) {
@@ -232,7 +234,8 @@ static void lex_str(Lexer *l) {
         err_syntax(l->L, &info, "unterminated string literal");
     }
     l->tk.t = TK_STR;
-    l->tk.s = str_new(l->L, s.s, s.len);
+    l->tk.s = str_new(l->L, s.len);
+    strncpy(str_val(l->tk.s), s.s, s.len);
     buf_free(l->L, &s);
 }
 
@@ -270,7 +273,8 @@ static void lex_long_str(Lexer *l) {
     }
     s.len = saved_len; // Get rid of closing long bracket from string contents
     l->tk.t = TK_STR;
-    l->tk.s = str_new(l->L, s.s, s.len);
+    l->tk.s = str_new(l->L, s.len);
+    strncpy(str_val(l->tk.s), s.s, s.len);
     buf_free(l->L, &s);
 }
 

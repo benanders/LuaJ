@@ -167,20 +167,21 @@ enum {
 // The format of each X-entry in the binary operator table is:
 //   token, precedence, bytecode opcode, is commutative?, is right associative?
 #define BINOPS \
-    X('+',    PREC_ADD, BC_ADDVV, 1, 0) \
-    X('-',    PREC_ADD, BC_SUBVV, 0, 0) \
-    X('*',    PREC_MUL, BC_MULVV, 1, 0) \
-    X('/',    PREC_MUL, BC_DIVVV, 0, 0) \
-    X('%',    PREC_MUL, BC_MODVV, 0, 0) \
-    X('^',    PREC_POW, BC_POW,   0, 1) \
-    X(TK_EQ,  PREC_CMP, BC_EQVV,  1, 0) \
-    X(TK_NEQ, PREC_CMP, BC_NEQVV, 1, 0) \
-    X('<',    PREC_CMP, BC_LTVV,  0, 0) \
-    X(TK_LE,  PREC_CMP, BC_LEVV,  0, 0) \
-    X('>',    PREC_CMP, BC_GTVV,  0, 0) \
-    X(TK_GE,  PREC_CMP, BC_GEVV,  0, 0) \
-    X(TK_AND, PREC_AND, BC_NOP,   0, 0) \
-    X(TK_OR,  PREC_OR,  BC_NOP,   0, 0)
+    X('+',       PREC_ADD,    BC_ADDVV,  1, 0) \
+    X('-',       PREC_ADD,    BC_SUBVV,  0, 0) \
+    X('*',       PREC_MUL,    BC_MULVV,  1, 0) \
+    X('/',       PREC_MUL,    BC_DIVVV,  0, 0) \
+    X('%',       PREC_MUL,    BC_MODVV,  0, 0) \
+    X('^',       PREC_POW,    BC_POW,    0, 1) \
+    X(TK_EQ,     PREC_CMP,    BC_EQVV,   1, 0) \
+    X(TK_NEQ,    PREC_CMP,    BC_NEQVV,  1, 0) \
+    X('<',       PREC_CMP,    BC_LTVV,   0, 0) \
+    X(TK_LE,     PREC_CMP,    BC_LEVV,   0, 0) \
+    X('>',       PREC_CMP,    BC_GTVV,   0, 0) \
+    X(TK_GE,     PREC_CMP,    BC_GEVV,   0, 0) \
+    X(TK_AND,    PREC_AND,    BC_NOP,    0, 0) \
+    X(TK_OR,     PREC_OR,     BC_NOP,    0, 0) \
+    X(TK_CONCAT, PREC_CONCAT, BC_CONCAT, 0, 1)
 
 static int BINOP_PREC[TK_LAST] = {
 #define X(tk, prec, _, __, ___) [tk] = prec,
@@ -532,6 +533,7 @@ static uint16_t inline_uint16_const(Parser *p, Expr *e) {
 static void invert_cond(Parser *p, int jmp) {
     BcIns *cond = &p->f->fn->ins[jmp - 1];
     int inverted = INVERT_OP[bc_op(*cond)];
+    assert(inverted != BC_NOP);
     bc_set_op(cond, inverted);
 }
 
@@ -553,7 +555,7 @@ static int fold_unop(int op, Expr *l) {
         expr_new(l, EXPR_PRIM, l->tk);
         l->tag = t ? TAG_TRUE : TAG_FALSE;
         return 1;
-    default: assert(0); // TODO: remaining unops (len)
+    default: UNREACHABLE();
     }
 }
 
@@ -660,7 +662,10 @@ static void emit_binop_left(Parser *p, Token *op, Expr *l) {
         break;
     case TK_AND: emit_branch_true(p, l, op->line); break;
     case TK_OR:  emit_branch_false(p, l, op->line); break;
-    default: assert(0); // TODO: remaining binops (concat)
+    case TK_CONCAT:
+        to_next_slot(p, l); // Concat values have to be in contiguous slots
+        break;
+    default: UNREACHABLE();
     }
 }
 
@@ -783,6 +788,7 @@ static void emit_rel(Parser *p, Token *op, Expr *l, Expr r) {
     if (ll->t != EXPR_NON_RELOC) {
         ll = &r, rr = l; // Constant on the right
         op_t = INVERT_TK[op_t];
+        assert(op_t != 0);
     }
     uint16_t d = inline_uint16_num(p, rr);
     uint8_t a = to_any_slot(p, ll);
@@ -813,6 +819,41 @@ static void emit_or(Parser *p, Expr *l, Expr r) {
     *l = r;
 }
 
+static int fold_concat(Parser *p, Token *op, Expr *l, Expr r) {
+    if (!is_str_expr(l) || !is_str_expr(&r)) {
+        return 0;
+    }
+    Str *s = str_new(p->L, (l->s->len + r.s->len) * sizeof(char));
+    char *concat = str_val(s);
+    strncpy(concat, str_val(l->s), l->s->len);
+    strncpy(&concat[l->s->len], str_val(r.s), r.s->len);
+    expr_new(l, EXPR_STR, *op);
+    l->s = s;
+    return 1;
+}
+
+static void emit_concat(Parser *p, Token *op, Expr *l, Expr r) {
+    if (fold_concat(p, op, l, r)) {
+        return;
+    }
+    assert(l->t == EXPR_NON_RELOC);
+    uint8_t b = l->slot;
+    if (r.t == EXPR_RELOC && bc_op(p->f->fn->ins[r.pc]) == BC_CONCAT) {
+        // Include 'l' in an existing concat instruction
+        free_expr_slot(p, l);
+        BcIns *concat = &p->f->fn->ins[r.pc];
+        assert(b == bc_b(*concat) - 1);
+        bc_set_b(concat, l->slot);
+        *l = r;
+    } else {
+        uint8_t c = to_next_slot(p, &r); // Strings must be in contiguous slots
+        free_expr_slot(p, &r);
+        free_expr_slot(p, l);
+        expr_new(l, EXPR_RELOC, *op);
+        l->pc = emit(p, ins3(BC_CONCAT, NO_SLOT, b, c), op->line);
+    }
+}
+
 static void emit_binop(Parser *p, Token *op, Expr *l, Expr r) {
     switch (op->t) {
     case '+': case '-': case '*': case '/': case '%': case '^':
@@ -824,9 +865,10 @@ static void emit_binop(Parser *p, Token *op, Expr *l, Expr r) {
     case '<': case TK_LE: case '>': case TK_GE:
         emit_rel(p, op, l, r);
         break;
-    case TK_AND: emit_and(p, l, r); break;
-    case TK_OR:  emit_or(p, l, r); break;
-    default: assert(0); // TODO: remaining binops (concat)
+    case TK_AND:    emit_and(p, l, r); break;
+    case TK_OR:     emit_or(p, l, r); break;
+    case TK_CONCAT: emit_concat(p, op, l, r); break;
+    default: UNREACHABLE();
     }
 }
 

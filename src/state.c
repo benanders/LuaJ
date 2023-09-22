@@ -195,11 +195,11 @@ static void err_msg(State *L, ErrInfo *info, char *fmt, va_list args) {
     va_copy(args2, args);
     size_t msg_len = vsnprintf(NULL, 0, fmt, args);
     size_t len = prefix_len + msg_len;
-    char *msg = mem_alloc(L, sizeof(char) * (len + 1));
+    Str *str = str_new(L, len);
+    char *msg = str_val(str);
     strncpy(msg, prefix, prefix_len);
-    vsprintf(&msg[prefix_len], fmt, args2);
+    vsnprintf(&msg[prefix_len], msg_len, fmt, args2);
     va_end(args2);
-    Str *str = str_new(L, msg, len);
     stack_push(L, str2v(str));
 }
 

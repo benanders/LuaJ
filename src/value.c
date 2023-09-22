@@ -16,10 +16,9 @@ static void obj_free(State *L, Obj *obj, size_t bytes) {
     mem_free(L, obj, bytes);
 }
 
-Str * str_new(State *L, char *src, size_t len) {
+Str * str_new(State *L, size_t len) {
     Str *str = (Str *) obj_new(L, OBJ_STR, sizeof(Str) + sizeof(char) * len);
     str->len = len;
-    strncpy((char *) (str + 1), src, len);
     return str;
 }
 

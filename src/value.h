@@ -112,7 +112,7 @@ typedef struct {
     size_t len;
 } Str;
 
-Str * str_new(State *L, char *src, size_t len);
+Str * str_new(State *L, size_t len);
 void str_free(State *L, Str *s);
 
 static inline uint64_t str2v(Str *s)  { return ptr2v(s); }

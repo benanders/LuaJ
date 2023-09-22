@@ -28,10 +28,11 @@
         ERR("attempt to " msg " %s and %s value", lt, rt)  \
     }
 
-#define CHECK_V(msg, l)     if (!is_num((l))) { ERR_UNOP(msg, l); }
+#define CHECK_V(msg, l)     if (!is_num((l))) { ERR_UNOP(msg, l) }
+#define CHECK_S(msg, l)     if (!is_str((l))) { ERR_UNOP(msg, l) }
 #define CHECK_VV(msg, l, r) if (!is_num((l)) || !is_num((r))) { ERR_BINOP(msg, l, r) }
-#define CHECK_VN(msg, l, r) if (!is_num((l))) { ERR_BINOP(msg, l, r); }
-#define CHECK_NV(msg, l, r) if (!is_num((r))) { ERR_BINOP(msg, l, r); }
+#define CHECK_VN(msg, l, r) if (!is_num((l))) { ERR_BINOP(msg, l, r) }
+#define CHECK_NV(msg, l, r) if (!is_num((r))) { ERR_BINOP(msg, l, r) }
 
 // The interpreter is written using computed gotos, which places individual
 // branch instructions at the end of each opcode (rather than using a loop with
@@ -47,14 +48,15 @@ void execute(State *L) {
     };
     void **dispatch = DISPATCH;
 
-    uint64_t v = stack_pop(L);
-    assert(is_fn(v));
-    Fn *fn = v2fn(v);
+    uint64_t fn_v = stack_pop(L);
+    assert(is_fn(fn_v));
+    Fn *fn = v2fn(fn_v);
     print_fn(L, fn);
 
     uint64_t *s = L->stack;
     uint64_t *k = fn->k;
     BcIns *ip = &fn->ins[0];
+    size_t len;
     DISPATCH();
 
 OP_NOP:
@@ -151,6 +153,22 @@ OP_MODNV:
 OP_POW:
     CHECK_VV("perform exponentiation on", s[bc_b(*ip)], s[bc_c(*ip)])
     s[bc_a(*ip)] = n2v(pow(v2n(s[bc_b(*ip)]), v2n(s[bc_c(*ip)])));
+    NEXT();
+
+OP_CONCAT:
+    len = 0;
+    for (uint8_t i = bc_b(*ip); i <= bc_c(*ip); i++) {
+        CHECK_S("concatenate", s[i]);
+        len += v2str(s[i])->len;
+    }
+    Str *v = str_new(L, len);
+    char *str = str_val(v);
+    for (uint8_t i = bc_b(*ip); i <= bc_c(*ip); i++) {
+        Str *x = v2str(s[i]);
+        strncpy(str, str_val(x), x->len);
+        str += x->len;
+    }
+    s[bc_a(*ip)] = str2v(v);
     NEXT();
 
 
