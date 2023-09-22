@@ -28,6 +28,7 @@
     X(KPRIM, 2)        \
     X(KINT, 2)         \
     X(KNUM, 2)         \
+    X(KSTR, 2)         \
     X(KFN, 2)          \
     X(KNIL, 2)         \
                        \
@@ -55,11 +56,13 @@
     X(ISF, 1)          \
     X(ISFC, 2)         \
     X(EQVV, 2)         \
-    X(EQVN, 2)         \
     X(EQVP, 2)         \
+    X(EQVN, 2)         \
+    X(EQVS, 2)         \
     X(NEQVV, 2)        \
-    X(NEQVN, 2)        \
     X(NEQVP, 2)        \
+    X(NEQVN, 2)        \
+    X(NEQVS, 2)        \
     X(LTVV, 2)         \
     X(LTVN, 2)         \
     X(LEVV, 2)         \

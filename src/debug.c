@@ -1,5 +1,6 @@
 
 #include <stdio.h>
+#include <ctype.h>
 
 #include "debug.h"
 
@@ -33,6 +34,35 @@ static void print_fn_name(Fn *f) {
     }
 }
 
+static void quote_ch(char ch) {
+    switch (ch) {
+    case '\\': printf("\\\\"); break;
+    case '\"': printf("\\\""); break;
+    case '\'': printf("\\'"); break;
+    case '\a': printf("\\a"); break;
+    case '\b': printf("\\b"); break;
+    case '\f': printf("\\f"); break;
+    case '\n': printf("\\n"); break;
+    case '\r': printf("\\r"); break;
+    case '\t': printf("\\t"); break;
+    case '\v': printf("\\v"); break;
+    case 0:    printf("\\0"); break;
+    default:
+        if (iscntrl(ch)) {
+            printf("\\%03o", ch);
+        } else {
+            printf("%c", ch);
+        }
+        break;
+    }
+}
+
+static void quote_str(char *s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        quote_ch(s[i]);
+    }
+}
+
 static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     printf("%.4d", idx);
     int op = bc_op(*ins);
@@ -48,6 +78,7 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
         case 3: printf("\t%d\t%d\t%d", bc_a(*ins), bc_b(*ins), bc_c(*ins)); break;
         default: break;
     }
+    Str *s;
     switch (op) {
     case BC_KNUM:
         printf("\t; %g", v2n(f->k[bc_d(*ins)]));
@@ -59,6 +90,12 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
             case TAG_TRUE:  printf("true"); break;
             case TAG_FALSE: printf("false"); break;
         }
+        break;
+    case BC_KSTR: case BC_EQVS: case BC_NEQVS:
+        s = v2str(f->k[bc_d(*ins)]);
+        printf("\t; \"");
+        quote_str(str_val(s), s->len);
+        printf("\"");
         break;
     case BC_KFN:
         printf("\t; ");

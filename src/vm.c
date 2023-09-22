@@ -17,15 +17,15 @@
 
 #define ERR_UNOP(msg, l)      \
     char *t = type_name((l)); \
-    ERR("attempt to " msg " a %s value", t)
+    ERR("attempt to " msg " %s value", t)
 
-#define ERR_BINOP(msg, l, r)                                 \
-    char *lt = type_name((l));                               \
-    char *rt = type_name((r));                               \
-    if (lt == rt) {                                          \
-        ERR("attempt to " msg " two %s values", lt)          \
-    } else {                                                 \
-        ERR("attempt to " msg " a %s and %s value", lt, rt)  \
+#define ERR_BINOP(msg, l, r)                               \
+    char *lt = type_name((l));                             \
+    char *rt = type_name((r));                             \
+    if (lt == rt) {                                        \
+        ERR("attempt to " msg " two %s values", lt)        \
+    } else {                                               \
+        ERR("attempt to " msg " %s and %s value", lt, rt)  \
     }
 
 #define CHECK_V(msg, l)     if (!is_num((l))) { ERR_UNOP(msg, l); }
@@ -73,6 +73,7 @@ OP_KINT:
     s[bc_a(*ip)] = n2v((double) bc_d(*ip));
     NEXT();
 OP_KNUM:
+OP_KSTR:
 OP_KFN:
     s[bc_a(*ip)] = k[bc_d(*ip)];
     NEXT();
@@ -188,21 +189,27 @@ OP_ISFC:
 OP_EQVV:
     if (s[bc_a(*ip)] != s[bc_d(*ip)]) { ip++; }
     NEXT();
+OP_EQVP:
+    if (s[bc_a(*ip)] != prim2v(bc_d(*ip))) { ip++; }
+    NEXT();
 OP_EQVN:
     if (s[bc_a(*ip)] != k[bc_d(*ip)]) { ip++; }
     NEXT();
-OP_EQVP:
-    if (s[bc_a(*ip)] != prim2v(bc_d(*ip))) { ip++; }
+OP_EQVS:
+    if (!str_eq(v2str(s[bc_a(*ip)]), v2str(k[bc_d(*ip)]))) { ip++; }
     NEXT();
 
 OP_NEQVV:
     if (s[bc_a(*ip)] == s[bc_d(*ip)]) { ip++; }
     NEXT();
+OP_NEQVP:
+    if (s[bc_a(*ip)] == prim2v(bc_d(*ip))) { ip++; }
+    NEXT();
 OP_NEQVN:
     if (s[bc_a(*ip)] == k[bc_d(*ip)]) { ip++; }
     NEXT();
-OP_NEQVP:
-    if (s[bc_a(*ip)] == prim2v(bc_d(*ip))) { ip++; }
+OP_NEQVS:
+    if (str_eq(v2str(s[bc_a(*ip)]), v2str(k[bc_d(*ip)]))) { ip++; }
     NEXT();
 
 OP_LTVV:

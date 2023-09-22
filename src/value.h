@@ -4,6 +4,7 @@
 
 #include <lua.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "state.h"
 #include "bytecode.h"
@@ -118,6 +119,9 @@ static inline uint64_t str2v(Str *s)  { return ptr2v(s); }
 static inline Str * v2str(uint64_t v) { return (Str *) v2ptr(v); }
 static inline int is_str(uint64_t v)  { return is_obj(v, OBJ_STR); }
 static inline char * str_val(Str *s)  { return (char *) (s + 1); }
+static inline int str_eq(Str *a, Str *b) {
+    return a->len == b->len && strncmp(str_val(a), str_val(b), a->len) == 0;
+}
 
 // Function prototype.
 typedef struct {
