@@ -63,7 +63,7 @@ static void quote_str(char *s, size_t len) {
     }
 }
 
-static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
+static void print_ins(Fn *f, int idx, const BcIns *ins) {
     printf("%.4d", idx);
     int op = bc_op(*ins);
     DebugInfo info = BC_DEBUG_INFO[op];
@@ -116,22 +116,22 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     printf("\n");
 }
 
-static void print_bc(State *L, Fn *f) {
+static void print_bc(Fn *f) {
     for (int idx = 0; idx < f->num_ins; idx++) {
-        print_ins(L, f, idx, &f->ins[idx]);
+        print_ins(f, idx, &f->ins[idx]);
     }
 }
 
-void print_fn(State *L, Fn *f) {
+void print_fn(Fn *f) {
     printf("-- ");
     print_fn_name(f);
     printf(" --\n");
-    print_bc(L, f);
+    print_bc(f);
     for (int i = 0; i < f->num_k; i++) {
         if (is_fn(f->k[i])) {
             Fn *f2 = v2fn(f->k[i]);
             printf("\n");
-            print_fn(L, f2);
+            print_fn(f2);
         }
     }
 }

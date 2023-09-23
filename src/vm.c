@@ -51,12 +51,12 @@ void execute(State *L) {
     uint64_t fn_v = stack_pop(L);
     assert(is_fn(fn_v));
     Fn *fn = v2fn(fn_v);
-    print_fn(L, fn);
-
+    print_fn(fn);
     uint64_t *s = L->stack;
     uint64_t *k = fn->k;
     BcIns *ip = &fn->ins[0];
-    size_t len;
+
+    CallInfo *cs = &L->call_stack[L->num_calls];
     DISPATCH();
 
 OP_NOP:
@@ -155,21 +155,23 @@ OP_POW:
     s[bc_a(*ip)] = n2v(pow(v2n(s[bc_b(*ip)]), v2n(s[bc_c(*ip)])));
     NEXT();
 
-OP_CONCAT:
-    len = 0;
+OP_CONCAT: {
+    size_t len = 0;
     for (uint8_t i = bc_b(*ip); i <= bc_c(*ip); i++) {
-        CHECK_S("concatenate", s[i]);
-        len += v2str(s[i])->len;
+        CHECK_S("concatenate", s[i])
+        Str *str = v2str(s[i]);
+        len += str->len;
     }
     Str *v = str_new(L, len);
-    char *str = str_val(v);
+    char *concat = str_val(v);
     for (uint8_t i = bc_b(*ip); i <= bc_c(*ip); i++) {
-        Str *x = v2str(s[i]);
-        strncpy(str, str_val(x), x->len);
-        str += x->len;
+        Str *str = v2str(s[i]);
+        memcpy(concat, str_val(str), str->len);
+        concat += str->len;
     }
     s[bc_a(*ip)] = str2v(v);
     NEXT();
+}
 
 
     // ---- Conditions ----
@@ -273,9 +275,77 @@ OP_JMP:
     ip += (int) bc_e(*ip) - JMP_BIAS;
     DISPATCH();
 
-OP_CALL:
-OP_RET0:
-OP_RET1:
-OP_RET:
+OP_CALL: {
+    CallInfo *c = &cs[L->num_calls++];
+    if (L->num_calls >= L->max_calls) {
+        L->call_stack = cs = mem_realloc(L, cs,
+                L->max_calls * sizeof(CallInfo),
+                L->max_calls * sizeof(CallInfo) * 2);
+        L->max_calls *= 2;
+    }
+    c->fn = fn;
+    c->ip = ip;
+    c->s = s;
+    c->num_rets = bc_c(*ip);
+    fn = v2fn(s[bc_a(*ip)]);
+    ip = &fn->ins[0];
+    s = &s[bc_a(*ip) + 1];
+    k = fn->k;
+    DISPATCH();
+}
+
+OP_RET0: {
+    if (L->num_calls == 0) {
+        goto end;
+    }
+    CallInfo *c = &cs[--L->num_calls];
+    for (int i = -1; i < c->num_rets - 1; i++) { // Return values start at s[-1]
+        s[i] = VAL_NIL;
+    }
+    fn = c->fn;
+    ip = c->ip;
+    s = c->s;
+    k = fn->k;
+    NEXT();
+}
+
+OP_RET1: {
+    if (L->num_calls == 0) {
+        goto end;
+    }
+    CallInfo *c = &cs[--L->num_calls];
+    s[-1] = s[bc_d(*ip)]; // Return values start at s[-1]
+    for (int i = 0; i < c->num_rets - 1; i++) { // Set the rest to nil
+        s[i] = VAL_NIL;
+    }
+    fn = c->fn;
+    ip = c->ip;
+    s = c->s;
+    k = fn->k;
+    NEXT();
+}
+
+OP_RET: {
+    if (L->num_calls == 0) {
+        goto end;
+    }
+    CallInfo *c = &cs[--L->num_calls];
+    int i = 0;
+    while (i < bc_d(*ip)) { // Copy return values
+        s[-1 + i] = s[bc_a(*ip) + i]; // Return values start at s[-1]
+        i++;
+    }
+    while (i < c->num_rets) { // Set remaining to nil
+        s[-1 + i] = VAL_NIL; // Return values start at s[-1]
+        i++;
+    }
+    fn = c->fn;
+    ip = c->ip;
+    s = c->s;
+    k = fn->k;
+    NEXT();
+}
+
+end:
     printf("first stack: %g\n", v2n(s[1]));
 }

@@ -21,11 +21,15 @@ LUA_API lua_State * lua_newstate(lua_Alloc f, void *ud) {
     L->err = NULL;
     L->stack_size = 4096;
     L->stack = L->top = mem_alloc(L, L->stack_size * sizeof(uint64_t));
+    L->max_calls = 256;
+    L->num_calls = 0;
+    L->call_stack = mem_alloc(L, L->max_calls * sizeof(CallInfo));
     return L;
 }
 
 LUA_API void lua_close(lua_State *L) {
     mem_free(L, L->stack, L->stack_size * sizeof(uint64_t));
+    mem_free(L, L->call_stack, L->max_calls * sizeof(CallInfo));
     mem_free(L, L, sizeof(State));
 }
 

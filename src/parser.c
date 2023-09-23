@@ -65,7 +65,10 @@ static void enter_fn(Parser *p, FnScope *f, Str *name, int start_line) {
 static void exit_fn(Parser *p, int end_line) {
     assert(p->f);
     p->f->fn->end_line = end_line;
-    emit(p, ins0(BC_RET0), end_line);
+    uint8_t last_op = bc_op(p->f->fn->ins[p->f->fn->num_ins - 1]);
+    if (last_op != BC_RET0 && last_op != BC_RET1 && last_op != BC_RET) {
+        emit(p, ins0(BC_RET0), end_line);
+    }
     p->f = p->f->outer;
 }
 
@@ -1304,12 +1307,13 @@ static void parse_return(Parser *p) {
         int num_ret = parse_expr_list(p, &e);
         if (num_ret == 1) {
             uint8_t slot = to_any_slot(p, &e);
+            free_expr_slot(p, &e);
             emit(p, ins1(BC_RET1, slot), ret.line);
         } else {
             to_next_slot(p, &e); // Force contiguous slots
             emit(p, ins2(BC_RET, p->f->num_locals, num_ret), ret.line);
+            p->f->num_stack -= num_ret; // Clean up the stack
         }
-        p->f->num_stack -= num_ret; // Clean up the stack
     }
 }
 

@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <setjmp.h>
 
+#include "bytecode.h"
+
 #define UNREACHABLE() (assert(0))
 
 // File, line, and column information for errors
@@ -29,6 +31,13 @@ typedef struct Err {
 
 typedef void (*ProtectedFn)(struct lua_State *L, void *ud);
 
+typedef struct {
+    void *fn;    // Caller function (Fn *)
+    BcIns *ip;   // Caller IP
+    uint64_t *s; // Caller stack base pointer
+    int num_rets;
+} CallInfo;
+
 typedef struct lua_State {
     // Memory allocation
     lua_Alloc alloc_fn;
@@ -41,6 +50,10 @@ typedef struct lua_State {
     uint64_t *stack;
     uint64_t *top;
     int stack_size;
+
+    // Call stack
+    CallInfo *call_stack;
+    int num_calls, max_calls;
 } State;
 
 // Memory allocation
