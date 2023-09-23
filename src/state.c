@@ -120,9 +120,7 @@ LUA_API int (lua_pcall) (
 void stack_push(State *L, uint64_t v) {
     ptrdiff_t n = L->top - L->stack;
     if (n >= L->stack_size) {
-        L->stack = mem_realloc(
-                L,
-                L->stack,
+        L->stack = mem_realloc(L, L->stack,
                 L->stack_size * sizeof(uint64_t),
                 L->stack_size * sizeof(uint64_t) * 2);
         L->stack_size *= 2;

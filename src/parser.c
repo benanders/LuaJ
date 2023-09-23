@@ -1100,7 +1100,7 @@ static void adjust_assign(
     } else {
         to_next_slot(p, r); // Contiguous expression slots
         if (extra > 0) { // Set extra vars to nil
-            emit_knil(p, p->f->num_locals - extra, extra, line);
+            emit_knil(p, p->f->num_stack, extra, line);
         }
     }
 }
@@ -1185,9 +1185,13 @@ static void parse_assign(Parser *p, Expr *l) {
         discharge(p, &r);
         free_expr_slot(p, &r);
         to_slot(p, &r, last_var->slot);
+        num_exprs--;
         num_vars--;
     } else {
         adjust_assign(p, num_vars, num_exprs, &r, assign.line);
+        if (num_exprs < num_vars) {
+            num_exprs = num_vars; // 'nil' is emitted for the missing vars
+        }
     }
     for (int i = num_vars - 1; i >= 0; i--) {
         uint8_t expr_slot = p->f->num_stack - num_exprs + i;
