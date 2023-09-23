@@ -4,20 +4,164 @@
 
 #include <stdint.h>
 
-// Bytecode instructions are 32 bits. Arguments are in the format:
+// Bytecode instructions are 32 bits with an 8-bit opcode. Different
+// instructions have different operands. Instructions can have either three
+// 8-bit operands (A, B, and C), one 8-bit (A) and one 16-bit (D) operand, or
+// one 24-bit operand (E).
 //
 //     xxxxxxxx  xxxxxxxx  xxxxxxxx  xxxxxxxx
-//     Opcode--  A-------  B-------  C-------
-//                         D-----------------
-//               E---------------------------
+// 1)  opcode--  A-------  B-------  C-------
+// 2)  opcode--  A-------  D-----------------
+// 3)  opcode--  E---------------------------
 //
-// Opcodes are always 8 bits. Some instructions take 3 8-bit arguments, some
-// take 1 8-bit and 1 16-bit, and JMP takes a single 24-bit bytecode offset.
+// The possible operand types are as follows. The opcode suffix letters (e.g.,
+// 'VV', 'VP', 'NV', etc.) specify the types of the operands.
+//
+// * var (V):  A stack slot
+// * prim (P): A primitive type tag ('TAG_NIL', 'TAG_FALSE', or 'TAG_TRUE')
+// * num (N):  An index into the current function's constants table ('fn->k')
+//             representing a constant floating-point number
+// * int:      A 16-bit signed integer
+// * str (S):  An index into the current function's constants table ('fn->k')
+//             representing an immutable string object
+// * func (F): An index into the current function's constants table ('fn->k')
+//             representing a function prototype object
+//
+// Bytecode specification:
+//
+//   NOP       No operation; used to delete instructions on-the-fly in parsing
+//
+//
+// -- Storage Operations --
+//
+//   MOV       Copies a value from a source to a destination stack slot
+//             A -- Destination stack slot to copy to
+//             D -- Source stack slot to copy from
+//
+//   KPRIM     Sets a stack slot to a primitive value
+//             A -- Destination stack slot
+//             D -- Primitive tag (one of 'TAG_NIL', 'TAG_FALSE', or 'TAG_TRUE')
+//
+//   KINT      Sets a stack slot to a number value
+//             A -- Destination stack slot
+//             D -- 16-bit signed integer (converted to a double at runtime)
+//
+//   KNUM      Sets a stack slot to a number value from the constants table
+//             A -- Destination stack slot
+//             D -- 16-bit unsigned index into the function's constants table
+//
+//   KSTR      Sets a stack slot to a string object from the constants table
+//             A -- Destination stack slot
+//             D -- 16-bit unsigned index into the function's constants table
+//
+//   KFN       Sets a stack slot to a function object from the constants table
+//             A -- Destination stack slot
+//             D -- 16-bit unsigned index into the function's constants table
+//
+//   KNIL      Sets stack slots 'A' through 'D' to nil
+//             A -- First stack slot to set to nil
+//             D -- Last stack slot to set to nil
+//
+//
+// -- Arithmetic Operations --
+//
+//   NEG       Negates the value in stack slot 'D' and stores the result in 'A'
+//             A -- Destination stack slot
+//             D -- Stack slot of the number value to negate
+//
+//   ADDVV     Adds 'B' and 'C' and stores the result in 'A'
+//             A -- Destination stack slot
+//             B -- Left operand; stack slot (a number)
+//             C -- Right operand; stack slot (a number)
+//
+//   ADDVN     Adds 'B' and 'C' and stores the result in 'A'
+//             A -- Destination stack slot
+//             B -- Left operand; stack slot (a number)
+//             C -- Right operand; 8-bit unsigned index into constants table
+//
+// ...the remaining arithmetic operations are self-explanatory...
+//
+//   POW       Calculates 'B^C' and stores the result in 'A'
+//             A -- Destination stack slot
+//             B -- Left operand; stack slot (a number)
+//             C -- Right operand; stack slot (a number)
+//
+//   CONCAT    Concatenates the strings in stack slots 'B' through 'C' and
+//             stores the result in 'A'
+//             A -- Destination stack slot
+//             B -- First stack slot to concatenate (a string)
+//             C -- Last stack slot to concatenate (a string)
+//
+//
+// -- Conditional Operations --
+//
+// Conditional jumps consist of two instructions: a conditional instruction
+// followed immediately by a 'JMP' instruction. An unconditional jump consists
+// of just a 'JMP' instruction without a preceding condition.
+//
+//   NOT       Sets 'A' to the boolean not value of stack slot 'D'
+//             A -- Destination stack slot to store the result in
+//             D -- Stack slot
+//
+//   IST       Jumps if the value in 'D' is true
+//             A -- Unused
+//             D -- Stack slot
+//
+//   ISF       Jumps if the value in 'D' is false
+//             A -- Unused
+//             D -- Stack slot
+//
+//   ISTC      If the value in 'D' is true, then copies 'D' to 'A' and jumps
+//             A -- Destination stack slot for the conditional copy
+//             D -- Stack slot
+//
+//   ISFC      If the value in 'D' is false, then copies 'D' to 'A' and jumps
+//             A -- Destination stack slot for the conditional copy
+//             D -- Stack slot
+//
+//   EQVV      Compares 'A' and 'D' and jumps if they're equal
+//             A -- Left operand; stack slot
+//             D -- Right operand; stack slot
+//
+// ...the remaining conditional operations are self-explanatory...
+//
+//
+// -- Control Flow Operations --
+//
+//   JMP       Jumps to a target instruction.
+//             E -- 24-bit signed jump offset, relative to the PC of the
+//                  instruction AFTER the 'JMP' instruction
+//
+//   CALL      Calls the function in stack slot 'A' with 'B' arguments in
+//             contiguous stack slots immediately after 'A'. Expects 'C' return
+//             values:
+//                 A, A+1, ..., A+C-1 = A(A+1, ..., A+B-1)
+//             A -- Stack slot of the function to call
+//             B -- Number of arguments
+//             C -- Number of return values
+//
+//   RET0      Returns from a function with no return values
+//                 return
+//
+//   RET1      Returns one value from a function
+//                 return D
+//             D -- Stack slot of value to return
+//
+//   RET       Returns two or more values from a function (must be in
+//             contiguous stack slots)
+//                 return A, A+1, ..., A+D-1
+//             A -- Stack slot of first value to return
+//             D -- Number of values to return
 
-// JMPs are relative to the PC of the instruction after the jump. The jump
-// bias is added to the signed jump offset to make it unsigned and easily
-// stored in the 24 bit E argument. The interpreter subtracts the bias to turn
-// it back into the original signed value.
+// Jump offsets are stored as 24-bit signed values, calculated by:
+//
+//   E = target PC - jump PC + JMP_BIAS
+//   target PC = jmp PC + E - JMP_BIAS
+//
+// Where E is the 24-bit E argument for the 'JMP' instruction. We opt for
+// adding and subtracting a JMP_BIAS instead of storing the offset as a signed
+// twos-complement integer because sign-extending a 24-bit value to 32-bits is
+// computationally more expensive than a subtraction.
 #define JMP_BIAS 0x800000
 
 #define BYTECODE       \
@@ -73,7 +217,7 @@
     X(GEVV, 2)         \
     X(GEVN, 2)         \
                        \
-    /* Control flow */ \
+    /* Control Flow */ \
     X(JMP, 1)          \
     X(CALL, 3)         \
     X(RET0, 0)         \
