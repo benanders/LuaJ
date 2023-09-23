@@ -116,23 +116,24 @@ static char * print_str(State *L, char *fmt, ...) {
 }
 
 static int quote_ch(char *s, char ch) {
+    int len = s ? 5 : 0;
     switch (ch) {
-    case '\\': return sprintf(s, "\\\\");
-    case '\"': return sprintf(s, "\\\"");
-    case '\'': return sprintf(s, "\\'");
-    case '\a': return sprintf(s, "\\a");
-    case '\b': return sprintf(s, "\\b");
-    case '\f': return sprintf(s, "\\f");
-    case '\n': return sprintf(s, "\\n");
-    case '\r': return sprintf(s, "\\r");
-    case '\t': return sprintf(s, "\\t");
-    case '\v': return sprintf(s, "\\v");
-    case 0:    return sprintf(s, "\\0");
+    case '\\': return snprintf(s, len, "\\\\");
+    case '\"': return snprintf(s, len, "\\\"");
+    case '\'': return snprintf(s, len, "\\'");
+    case '\a': return snprintf(s, len, "\\a");
+    case '\b': return snprintf(s, len, "\\b");
+    case '\f': return snprintf(s, len, "\\f");
+    case '\n': return snprintf(s, len, "\\n");
+    case '\r': return snprintf(s, len, "\\r");
+    case '\t': return snprintf(s, len, "\\t");
+    case '\v': return snprintf(s, len, "\\v");
+    case 0:    return snprintf(s, len, "\\0");
     default:
         if (iscntrl(ch)) {
-            return sprintf(s, "\\%03o", ch);
+            return snprintf(s, len, "\\%03o", ch);
         } else {
-            return sprintf(s, "%c", ch);
+            return snprintf(s, len, "%c", ch);
         }
     }
 }
