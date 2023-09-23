@@ -82,7 +82,7 @@ OP_KPRIM:
     s[bc_a(*ip)] = prim2v(bc_d(*ip));
     NEXT();
 OP_KINT:
-    s[bc_a(*ip)] = n2v((double) bc_d(*ip));
+    s[bc_a(*ip)] = n2v((double) ((int16_t) bc_d(*ip)));
     NEXT();
 OP_KNUM:
 OP_KSTR:

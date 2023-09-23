@@ -31,6 +31,9 @@ static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
         default: break;
     }
     switch (op) {
+    case BC_KINT:
+        printf("\t; %d", (int16_t) bc_d(*ins));
+        break;
     case BC_KNUM:
         printf("\t; %g", v2n(f->k[bc_d(*ins)]));
         break;
