@@ -5,8 +5,6 @@
 
 #include "value.h"
 
-#define MAX_VAL_LEN 200
-
 static Obj * obj_new(State *L, uint8_t type, size_t bytes) {
     Obj *obj = mem_alloc(L, bytes);
     obj->type = type;
@@ -105,6 +103,18 @@ char * type_name(uint64_t v) {
     }
 }
 
+static char * print_str(State *L, char *fmt, ...) {
+    va_list args1, args2;
+    va_start(args1, fmt);
+    va_copy(args2, args1);
+    size_t len = vsnprintf(NULL, 0, fmt, args1);
+    char *str = mem_alloc(L, len + 1);
+    vsnprintf(str, len + 1, fmt, args2);
+    va_end(args2);
+    va_end(args1);
+    return str;
+}
+
 static int quote_ch(char *s, char ch) {
     switch (ch) {
     case '\\': return sprintf(s, "\\\\");
@@ -128,7 +138,11 @@ static int quote_ch(char *s, char ch) {
 }
 
 static char * quote_str(State *L, char *str, size_t len) {
-    char *v = mem_alloc(L, len * 2 * sizeof(char));
+    size_t quoted_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        quoted_len += quote_ch(NULL, str[i]);
+    }
+    char *v = mem_alloc(L, (quoted_len + 3) * sizeof(char));
     char *s = v;
     s += sprintf(s, "\"");
     for (size_t i = 0; i < len; i++) {
@@ -139,24 +153,28 @@ static char * quote_str(State *L, char *str, size_t len) {
 }
 
 char * print_fn_name(State *L, Fn *f) {
-    char *v = mem_alloc(L, MAX_VAL_LEN * sizeof(char));
-    char *s = v;
+    char *fn_name;
     if (f->name) {
-        s += sprintf(s, "%.*s", (int) f->name->len, str_val(f->name));
+        fn_name = print_str(L, "%.*s", (int) f->name->len, str_val(f->name));
     } else {
-        s += sprintf(s, "<unknown>");
+        fn_name = print_str(L, "<unknown>");
     }
+    char *chunk_name;
     if (f->chunk_name) {
-        s += sprintf(s, "@%s", f->chunk_name);
+        chunk_name = print_str(L, "@%s", f->chunk_name);
     } else {
-        s += sprintf(s, "@<unknown>");
+        chunk_name = print_str(L, "@<unknown>");
     }
-    if (f->start_line >= 1) {
-        s += sprintf(s, ":%d", f->start_line);
+    char *line;
+    if (f->start_line >= 1 && f->end_line >= 1) {
+        line = print_str(L, ":%d-%d", f->start_line, f->end_line);
+    } else {
+        line = print_str(L, "");
     }
-    if (f->end_line >= f->start_line) {
-        s += sprintf(s, "-%d", f->end_line);
-    }
+    char *v = print_str(L, "%s%s%s", fn_name, chunk_name, line);
+    mem_free(L, fn_name, (strlen(fn_name) + 1) * sizeof(char));
+    mem_free(L, chunk_name, (strlen(chunk_name) + 1) * sizeof(char));
+    mem_free(L, line, (strlen(line) + 1) * sizeof(char));
     return v;
 }
 
@@ -165,9 +183,7 @@ char * print_val(State *L, uint64_t v) {
         if (is_nan(v)) {
             return "NaN";
         } else {
-            char *s = mem_alloc(L, MAX_VAL_LEN * sizeof(char));
-            snprintf(s, MAX_VAL_LEN, "%g", v2n(v));
-            return s;
+            return print_str(L, "%g", v2n(v));
         }
     } else if (is_nil(v)) {
         return "nil";
@@ -181,8 +197,6 @@ char * print_val(State *L, uint64_t v) {
     } else if (is_fn(v)) {
         return print_fn_name(L, v2fn(v));
     } else {
-        char *s = mem_alloc(L, MAX_VAL_LEN * sizeof(char));
-        snprintf(s, MAX_VAL_LEN, "object <%p>", v2ptr(v));
-        return s;
+        return print_str(L, "object <%p>", v2ptr(v));
     }
 }
