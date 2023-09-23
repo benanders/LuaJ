@@ -187,7 +187,7 @@ OP_CONCAT: {
     // ---- Conditions ----
 
 OP_NOT:
-    s[bc_a(*ip)] = compares_true(s[bc_d(*ip)]) ? VAL_TRUE : VAL_FALSE;
+    s[bc_a(*ip)] = compares_true(s[bc_d(*ip)]) ? VAL_FALSE : VAL_TRUE;
     NEXT();
 
     // Comparison instructions are always followed by a 'BC_JMP' instruction.

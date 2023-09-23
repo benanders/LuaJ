@@ -554,7 +554,7 @@ static int fold_unop(int op, Expr *l) {
         if (!is_const_expr(l)) {
             return 0;
         }
-        int t = !(l->t == EXPR_PRIM && (l->tag == TAG_FALSE || l->tag == TAG_NIL));
+        int t = l->t == EXPR_PRIM && (l->tag == TAG_FALSE || l->tag == TAG_NIL);
         expr_new(l, EXPR_PRIM, l->tk);
         l->tag = t ? TAG_TRUE : TAG_FALSE;
         return 1;
