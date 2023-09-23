@@ -4,6 +4,6 @@
 
 #include "value.h"
 
-void print_fn(Fn *f);
+void print_fn(State *L, Fn *f);
 
 #endif

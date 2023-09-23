@@ -15,55 +15,7 @@ static DebugInfo BC_DEBUG_INFO[] = {
 #undef X
 };
 
-static void print_fn_name(Fn *f) {
-    if (f->name) {
-        printf("%.*s", (int) f->name->len, str_val(f->name));
-    } else {
-        printf("<unknown>");
-    }
-    if (f->chunk_name) {
-        printf("@%s", f->chunk_name);
-    } else {
-        printf("@<unknown>");
-    }
-    if (f->start_line >= 1) {
-        printf(":%d", f->start_line);
-    }
-    if (f->end_line >= f->start_line) {
-        printf("-%d", f->end_line);
-    }
-}
-
-static void quote_ch(char ch) {
-    switch (ch) {
-    case '\\': printf("\\\\"); break;
-    case '\"': printf("\\\""); break;
-    case '\'': printf("\\'"); break;
-    case '\a': printf("\\a"); break;
-    case '\b': printf("\\b"); break;
-    case '\f': printf("\\f"); break;
-    case '\n': printf("\\n"); break;
-    case '\r': printf("\\r"); break;
-    case '\t': printf("\\t"); break;
-    case '\v': printf("\\v"); break;
-    case 0:    printf("\\0"); break;
-    default:
-        if (iscntrl(ch)) {
-            printf("\\%03o", ch);
-        } else {
-            printf("%c", ch);
-        }
-        break;
-    }
-}
-
-static void quote_str(char *s, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        quote_ch(s[i]);
-    }
-}
-
-static void print_ins(Fn *f, int idx, const BcIns *ins) {
+static void print_ins(State *L, Fn *f, int idx, const BcIns *ins) {
     printf("%.4d", idx);
     int op = bc_op(*ins);
     DebugInfo info = BC_DEBUG_INFO[op];
@@ -73,12 +25,11 @@ static void print_ins(Fn *f, int idx, const BcIns *ins) {
         return;
     }
     switch (info.num_args) {
-        case 1: printf("\t%d\t\t", bc_e(*ins)); break;
+        case 1: printf("\t%d\t\t", bc_d(*ins)); break;
         case 2: printf("\t%d\t%d\t", bc_a(*ins), bc_d(*ins)); break;
         case 3: printf("\t%d\t%d\t%d", bc_a(*ins), bc_b(*ins), bc_c(*ins)); break;
         default: break;
     }
-    Str *s;
     switch (op) {
     case BC_KNUM:
         printf("\t; %g", v2n(f->k[bc_d(*ins)]));
@@ -91,15 +42,8 @@ static void print_ins(Fn *f, int idx, const BcIns *ins) {
             case TAG_FALSE: printf("false"); break;
         }
         break;
-    case BC_KSTR: case BC_EQVS: case BC_NEQVS:
-        s = v2str(f->k[bc_d(*ins)]);
-        printf("\t; \"");
-        quote_str(str_val(s), s->len);
-        printf("\"");
-        break;
-    case BC_KFN:
-        printf("\t; ");
-        print_fn_name(v2fn(f->k[bc_d(*ins)]));
+    case BC_KSTR: case BC_KFN: case BC_EQVS: case BC_NEQVS:
+        printf("\t; %s", print_val(L, f->k[bc_d(*ins)]));
         break;
     case BC_SUBNV: case BC_DIVNV: case BC_MODNV:
         printf("\t; %g", v2n(f->k[bc_b(*ins)]));
@@ -116,22 +60,20 @@ static void print_ins(Fn *f, int idx, const BcIns *ins) {
     printf("\n");
 }
 
-static void print_bc(Fn *f) {
+static void print_bc(State *L, Fn *f) {
     for (int idx = 0; idx < f->num_ins; idx++) {
-        print_ins(f, idx, &f->ins[idx]);
+        print_ins(L, f, idx, &f->ins[idx]);
     }
 }
 
-void print_fn(Fn *f) {
-    printf("-- ");
-    print_fn_name(f);
-    printf(" --\n");
-    print_bc(f);
+void print_fn(State *L, Fn *f) {
+    printf("-- %s --\n", print_val(L, fn2v(f)));
+    print_bc(L, f);
     for (int i = 0; i < f->num_k; i++) {
         if (is_fn(f->k[i])) {
             Fn *f2 = v2fn(f->k[i]);
             printf("\n");
-            print_fn(f2);
+            print_fn(L, f2);
         }
     }
 }

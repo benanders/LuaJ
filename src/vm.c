@@ -13,7 +13,7 @@
 #define ERR(msg, ...)                            \
     int line = fn->line_info[ip - fn->ins];      \
     ErrInfo info = { fn->chunk_name, line, -1 }; \
-    err_run(L, &info, msg, __VA_ARGS__);
+    err_run(L, &info, msg, ## __VA_ARGS__);
 
 #define ERR_UNOP(msg, l)      \
     char *t = type_name((l)); \
@@ -51,7 +51,7 @@ void execute(State *L) {
     uint64_t fn_v = stack_pop(L);
     assert(is_fn(fn_v));
     Fn *fn = v2fn(fn_v);
-    print_fn(fn);
+    print_fn(L, fn);
     uint64_t *s = L->stack;
     uint64_t *k = fn->k;
     BcIns *ip = &fn->ins[0];
@@ -60,6 +60,16 @@ void execute(State *L) {
     DISPATCH();
 
 OP_NOP:
+    NEXT();
+
+OP_ASSERT:
+    // TODO: temporary
+    // 'ASSERT' is a temporary instruction that allows us to build some tests
+    // for the parser and interpreter without having to implement tables and
+    // C function calls
+    if (!compares_true(s[bc_d(*ip)])) {
+        ERR("assertion failed")
+    }
     NEXT();
 
 

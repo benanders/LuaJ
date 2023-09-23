@@ -147,5 +147,6 @@ static inline Fn * v2fn(uint64_t v) { return (Fn *) v2ptr(v); }
 static inline int is_fn(uint64_t v) { return is_obj(v, OBJ_FN);  }
 
 char * type_name(uint64_t v);
+char * print_val(State *L, uint64_t v);
 
 #endif

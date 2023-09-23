@@ -14,6 +14,7 @@ static char *KEYWORDS[] = {
     "local", "function", "if", "else", "elseif", "then", "while", "do",
     "repeat", "until", "for", "end", "break", "return", "in", "and", "or",
     "not", "nil", "false", "true",
+    "assert", // TODO: temporary
 };
 
 typedef struct {

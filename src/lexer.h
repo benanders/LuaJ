@@ -45,6 +45,7 @@ enum {
     TK_NIL,
     TK_FALSE,
     TK_TRUE,
+    TK_ASSERT, // TODO: temporary
 
     // Values
     TK_IDENT,

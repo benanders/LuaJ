@@ -1308,13 +1308,25 @@ static void parse_return(Parser *p) {
         if (num_ret == 1) {
             uint8_t slot = to_any_slot(p, &e);
             free_expr_slot(p, &e);
-            emit(p, ins1(BC_RET1, slot), ret.line);
+            emit(p, ins2(BC_RET1, 0, slot), ret.line);
         } else {
             to_next_slot(p, &e); // Force contiguous slots
             emit(p, ins2(BC_RET, p->f->num_locals, num_ret), ret.line);
             p->f->num_stack -= num_ret; // Clean up the stack
         }
     }
+}
+
+static void parse_assert(Parser *p) {
+    Token assert;
+    expect_tk(p->l, TK_ASSERT, &assert);
+    expect_tk(p->l, '(', NULL);
+    Expr l;
+    parse_expr(p, &l);
+    expect_tk(p->l, ')', NULL);
+    uint8_t slot = to_any_slot(p, &l);
+    free_expr_slot(p, &l);
+    emit(p, ins2(BC_ASSERT, 0, slot), assert.line);
 }
 
 static void parse_stmt(Parser *p) {
@@ -1328,6 +1340,7 @@ static void parse_stmt(Parser *p) {
         case TK_FOR:      assert(0); // TODO
         case TK_BREAK:    parse_break(p); break;
         case TK_RETURN:   parse_return(p); break;
+        case TK_ASSERT:   parse_assert(p); break; // TODO: temporary
         default:          parse_assign_or_call(p); break;
     }
     // Make sure each statement cleans up after itself

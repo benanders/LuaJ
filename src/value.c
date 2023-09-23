@@ -1,7 +1,11 @@
 
 #include <string.h>
+#include <stdio.h>
+#include <ctype.h>
 
 #include "value.h"
+
+#define MAX_VAL_LEN 200
 
 static Obj * obj_new(State *L, uint8_t type, size_t bytes) {
     Obj *obj = mem_alloc(L, bytes);
@@ -98,5 +102,87 @@ char * type_name(uint64_t v) {
         return "function";
     } else {
         return "object";
+    }
+}
+
+static int quote_ch(char *s, char ch) {
+    switch (ch) {
+    case '\\': return sprintf(s, "\\\\");
+    case '\"': return sprintf(s, "\\\"");
+    case '\'': return sprintf(s, "\\'");
+    case '\a': return sprintf(s, "\\a");
+    case '\b': return sprintf(s, "\\b");
+    case '\f': return sprintf(s, "\\f");
+    case '\n': return sprintf(s, "\\n");
+    case '\r': return sprintf(s, "\\r");
+    case '\t': return sprintf(s, "\\t");
+    case '\v': return sprintf(s, "\\v");
+    case 0:    return sprintf(s, "\\0");
+    default:
+        if (iscntrl(ch)) {
+            return sprintf(s, "\\%03o", ch);
+        } else {
+            return sprintf(s, "%c", ch);
+        }
+    }
+}
+
+static char * quote_str(State *L, char *str, size_t len) {
+    char *v = mem_alloc(L, len * 2 * sizeof(char));
+    char *s = v;
+    s += sprintf(s, "\"");
+    for (size_t i = 0; i < len; i++) {
+        s += quote_ch(s, str[i]);
+    }
+    s += sprintf(s, "\"");
+    return v;
+}
+
+char * print_fn_name(State *L, Fn *f) {
+    char *v = mem_alloc(L, MAX_VAL_LEN * sizeof(char));
+    char *s = v;
+    if (f->name) {
+        s += sprintf(s, "%.*s", (int) f->name->len, str_val(f->name));
+    } else {
+        s += sprintf(s, "<unknown>");
+    }
+    if (f->chunk_name) {
+        s += sprintf(s, "@%s", f->chunk_name);
+    } else {
+        s += sprintf(s, "@<unknown>");
+    }
+    if (f->start_line >= 1) {
+        s += sprintf(s, ":%d", f->start_line);
+    }
+    if (f->end_line >= f->start_line) {
+        s += sprintf(s, "-%d", f->end_line);
+    }
+    return v;
+}
+
+char * print_val(State *L, uint64_t v) {
+    if (is_num(v)) {
+        if (is_nan(v)) {
+            return "NaN";
+        } else {
+            char *s = mem_alloc(L, MAX_VAL_LEN * sizeof(char));
+            snprintf(s, MAX_VAL_LEN, "%g", v2n(v));
+            return s;
+        }
+    } else if (is_nil(v)) {
+        return "nil";
+    } else if (is_false(v)) {
+        return "false";
+    } else if (is_true(v)) {
+        return "true";
+    } else if (is_str(v)) {
+        Str *str = v2str(v);
+        return quote_str(L, str_val(str), str->len);
+    } else if (is_fn(v)) {
+        return print_fn_name(L, v2fn(v));
+    } else {
+        char *s = mem_alloc(L, MAX_VAL_LEN * sizeof(char));
+        snprintf(s, MAX_VAL_LEN, "object <%p>", v2ptr(v));
+        return s;
     }
 }

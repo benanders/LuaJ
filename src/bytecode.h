@@ -166,6 +166,7 @@
 
 #define BYTECODE       \
     X(NOP, 0)          \
+    X(ASSERT, 1)       \
                        \
     /* Storage */      \
     X(MOV, 2)          \
