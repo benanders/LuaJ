@@ -901,6 +901,7 @@ static int parse_params(Parser *p) {
         read_tk(p->l, NULL);
         def_local(p, name.s);
         reserve_slots(p, 1);
+        num_params++;
         if (peek_tk(p->l, NULL) == ',') {
             read_tk(p->l, NULL);
         } else {
@@ -1097,6 +1098,7 @@ static void adjust_assign(
     if (r->t == EXPR_CALL) {
         int num_rets = extra < 0 ? 0 : extra + 1;
         bc_set_c(&p->f->fn->ins[r->pc], num_rets);
+        reserve_slots(p, extra);
     } else {
         to_next_slot(p, r); // Contiguous expression slots
         if (extra > 0) { // Set extra vars to nil

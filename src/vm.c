@@ -298,9 +298,12 @@ OP_CALL: {
     c->s = s;
     c->num_rets = bc_c(*ip);
     fn = v2fn(s[bc_a(*ip)]);
-    ip = &fn->ins[0];
-    s = &s[bc_a(*ip) + 1];
+    s = &s[bc_a(*ip) + 1]; // Function itself is at 's[bc_a(*ip)]'
+    for (int i = bc_b(*ip); i < fn->num_params; i++) { // Set missing args to nil
+        s[i] = VAL_NIL;
+    }
     k = fn->k;
+    ip = &fn->ins[0];
     DISPATCH();
 }
 
@@ -309,8 +312,8 @@ OP_RET0: {
         goto end;
     }
     CallInfo *c = &cs[--L->num_calls];
-    for (int i = -1; i < c->num_rets - 1; i++) { // Return values start at s[-1]
-        s[i] = VAL_NIL;
+    for (int i = -1; i < c->num_rets - 1; i++) { // Set missing returns to nil
+        s[i] = VAL_NIL; // Return values start at s[-1]
     }
     fn = c->fn;
     ip = c->ip;
@@ -345,7 +348,7 @@ OP_RET: {
         s[-1 + i] = s[bc_a(*ip) + i]; // Return values start at s[-1]
         i++;
     }
-    while (i < c->num_rets) { // Set remaining to nil
+    while (i < c->num_rets) { // Set extra returns to nil
         s[-1 + i] = VAL_NIL; // Return values start at s[-1]
         i++;
     }
